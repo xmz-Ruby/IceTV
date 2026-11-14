@@ -91,6 +91,7 @@ jest.mock('@/features/play/hooks/useEpisodeSwitch', () => ({
     handleEpisodeChange: jest.fn(),
     handlePreviousEpisode: jest.fn(),
     handleNextEpisode: jest.fn(),
+    handlePlaybackLineChange: jest.fn(),
   }),
 }));
 

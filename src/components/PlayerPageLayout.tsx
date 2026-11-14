@@ -19,6 +19,7 @@ interface PlayerPageLayoutProps {
   artRef: RefObject<HTMLDivElement | null>;
   titleSuffix?: ReactNode;
   tags?: ReactNode[];
+  playerToolbar?: ReactNode;
   playerOverlay?: ReactNode;
   rightPanel: ReactNode;
   mobilePanelAlwaysVisible?: boolean;
@@ -82,6 +83,7 @@ export function PlayerPageLayout({
   artRef,
   titleSuffix,
   tags = [],
+  playerToolbar,
   playerOverlay,
   rightPanel,
   mobilePanelAlwaysVisible = false,
@@ -106,6 +108,12 @@ export function PlayerPageLayout({
             </span>
           )}
         </div>
+
+        {playerToolbar && (
+          <div className='flex flex-shrink-0 items-center gap-2 px-4 py-2 md:px-0 md:pb-3 md:pt-0'>
+            {playerToolbar}
+          </div>
+        )}
 
         {/* 内容区：移动端与竖屏平板上下排列，分栏时播放器吃满剩余宽高 + 固定宽右面板 */}
         <div className='relative flex min-h-0 flex-1 flex-col split:flex-row'>

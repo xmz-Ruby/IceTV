@@ -19,14 +19,17 @@ import type { SearchResult } from '@/lib/types';
 jest.mock('@/components/PlayerPageLayout', () => ({
   PlayerPageLayout: ({
     artRef,
+    playerToolbar,
     playerOverlay,
     rightPanel,
   }: {
     artRef: RefObject<HTMLDivElement | null>;
+    playerToolbar?: ReactNode;
     playerOverlay: ReactNode;
     rightPanel: ReactNode;
   }) => (
     <>
+      {playerToolbar}
       <div ref={artRef}>
         <video />
       </div>
@@ -170,6 +173,39 @@ describe('PlayMainContent', () => {
     expect(buildLoadingTimeoutMessage(20)).toBe(
       '媒体加载已连续 20 秒无进展，源站响应超时',
     );
+  });
+
+  it('错误状态下仍可通过播放线路下拉切换其他线路', () => {
+    const onPlaybackLineChange = jest.fn();
+    const multiLineDetail = {
+      ...detail,
+      playback_line: 'a:1',
+      playback_lines: [
+        {
+          key: 'a:1',
+          label: '流畅',
+          episodes: detail.episodes,
+          episodes_titles: ['正片'],
+        },
+        {
+          key: 'b:1',
+          label: '蓝光4K',
+          episodes: ['https://example.com/b.m3u8'],
+          episodes_titles: ['正片'],
+        },
+      ],
+    };
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        detail={multiLineDetail}
+        playbackError='当前线路加载失败'
+        onPlaybackLineChange={onPlaybackLineChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '播放线路' }));
+    fireEvent.click(screen.getByRole('option', { name: /蓝光4K/ }));
+    expect(onPlaybackLineChange).toHaveBeenCalledWith('b:1');
   });
 
   it('向详情面板传递详情加载状态', () => {

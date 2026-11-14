@@ -2,7 +2,12 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 
 import { usePlayInit } from '@/features/play/hooks/usePlayInit';
 import type { HistoryRestoreGate } from '@/features/play/hooks/usePlayProgress';
+import {
+  readDetailSnapshot,
+  saveDetailSnapshot,
+} from '@/features/play/lib/detailSnapshot';
 import { peekResolvedLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
+import { selectPlaybackLine } from '@/features/play/lib/playbackLines';
 import {
   getOrProbe,
   getSnapshot,
@@ -992,6 +997,71 @@ describe('usePlayInit 直达入口读取播放记录', () => {
       needPreferRef: { current: false },
     });
   }
+
+  it('后台详情刷新沿用用户刚切换的线路，而不是旧快照或源站默认线路', async () => {
+    const initial = createSource('cms-refresh');
+    const multi: SearchResult = {
+      ...initial,
+      playback_line: 'a:1',
+      playback_lines: [
+        {
+          key: 'a:1',
+          label: '流畅',
+          episodes: initial.episodes,
+          episodes_titles: ['第1集'],
+        },
+        {
+          key: 'b:1',
+          label: '蓝光',
+          episodes: ['https://high.example/1.m3u8'],
+          episodes_titles: ['第1集'],
+        },
+      ],
+    };
+    const fresh: SearchResult = {
+      ...multi,
+      playback_lines: multi.playback_lines!.map((line) => ({
+        ...line,
+        episodes: line.episodes.map((url) => `${url}?new=1`),
+      })),
+    };
+    saveDetailSnapshot(multi.source, multi.id, multi);
+    let resolveDetail!: (detail: SearchResult) => void;
+    installFetch(
+      {},
+      {},
+      {
+        '/api/detail': new Promise<SearchResult>((resolve) => {
+          resolveDetail = resolve;
+        }),
+        '/api/search': Promise.resolve({ results: [] }),
+        '/api/playrecords': Promise.resolve({}),
+      },
+    );
+    const detailRef = { current: multi };
+    const params = setupHook(null, {
+      currentSource: multi.source,
+      currentId: multi.id,
+      currentSourceRef: { current: multi.source },
+      currentIdRef: { current: multi.id },
+      detailRef,
+      needPreferRef: { current: false },
+    });
+    await waitFor(() => expect(params.setDetail).toHaveBeenCalledWith(multi));
+    const selected = selectPlaybackLine(multi, 'b:1');
+    detailRef.current = selected;
+    saveDetailSnapshot(selected.source, selected.id, selected);
+    await act(async () => resolveDetail(fresh));
+    const updates = (params.setDetail as jest.Mock).mock.calls
+      .map(([update]) => update)
+      .filter((update) => typeof update === 'function');
+    const result = updates.at(-1)(selected);
+    expect(result.playback_line).toBe('b:1');
+    expect(result.episodes).toEqual(['https://high.example/1.m3u8?new=1']);
+    expect(readDetailSnapshot(multi.source, multi.id)?.playback_line).toBe(
+      'b:1',
+    );
+  });
 
   it('keeps server source order when merging previously fetched details', async () => {
     const good = createSource('good');

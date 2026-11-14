@@ -70,6 +70,7 @@ const mockEpisodeSwitch = {
   handleEpisodeChange: jest.fn(),
   handlePreviousEpisode: jest.fn(),
   handleNextEpisode: jest.fn(),
+  handlePlaybackLineChange: jest.fn(),
 };
 const mockDanmakuPreference = {
   enabledRef: { current: false },

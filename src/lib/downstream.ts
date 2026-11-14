@@ -40,7 +40,7 @@ import {
   type SourceSearchOutcome,
   recordSourceSearchOutcome,
 } from '@/lib/source-health.server';
-import { SearchResult } from '@/lib/types';
+import { SearchResult, VodPlaybackLine } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
@@ -53,6 +53,7 @@ interface ApiSearchItem {
   vod_serial?: number | string;
   vod_total?: number | string;
   vod_play_url?: string;
+  vod_play_from?: string;
   vod_class?: string;
   vod_year?: string;
   vod_content?: string;
@@ -89,32 +90,52 @@ function isSupportedVodPlaybackUrl(url: string): boolean {
   }
 }
 
-function parseVodPlayUrl(vodPlayUrl: string): {
-  episodes: string[];
-  titles: string[];
-} {
-  let episodes: string[] = [];
-  let titles: string[] = [];
+function parseVodPlayUrl(
+  vodPlayUrl: string,
+  vodPlayFrom = '',
+): Pick<
+  SearchResult,
+  'episodes' | 'episodes_titles' | 'playback_lines' | 'playback_line'
+> {
+  const lines: VodPlaybackLine[] = [];
+  const names = typeof vodPlayFrom === 'string' ? vodPlayFrom.split('$$$') : [];
+  const occurrences = new Map<string, number>();
 
-  const sources = vodPlayUrl.split('$$$');
-  for (const source of sources) {
-    const matchEpisodes: string[] = [];
-    const matchTitles: string[] = [];
-    const pairs = source.split('#');
-    for (const pair of pairs) {
-      const parts = pair.split('$');
-      if (parts.length === 2 && isSupportedVodPlaybackUrl(parts[1])) {
-        matchTitles.push(normalizeInlineText(parts[0]));
-        matchEpisodes.push(parts[1]);
-      }
+  for (const [index, source] of vodPlayUrl.split('$$$').entries()) {
+    const label =
+      normalizeInlineText(names[index] || '') || `线路 ${index + 1}`;
+    const occurrence = (occurrences.get(label) || 0) + 1;
+    occurrences.set(label, occurrence);
+    const line: VodPlaybackLine = {
+      key: `${label}:${occurrence}`,
+      label,
+      episodes: [],
+      episodes_titles: [],
+    };
+    for (const pair of source.split('#')) {
+      const separator = pair.indexOf('$');
+      if (separator < 0) continue;
+      const url = pair.slice(separator + 1);
+      if (!isSupportedVodPlaybackUrl(url)) continue;
+      line.episodes_titles.push(normalizeInlineText(pair.slice(0, separator)));
+      line.episodes.push(url);
     }
-    if (matchEpisodes.length > episodes.length) {
-      episodes = matchEpisodes;
-      titles = matchTitles;
-    }
+    if (line.episodes.length > 0) lines.push(line);
   }
 
-  return { episodes, titles };
+  const selected = lines.reduce<VodPlaybackLine | null>(
+    (best, line) =>
+      !best || line.episodes.length > best.episodes.length ? line : best,
+    null,
+  );
+  return {
+    episodes: selected?.episodes || [],
+    episodes_titles: selected?.episodes_titles || [],
+    ...(lines.length > 1 && {
+      playback_lines: lines,
+      playback_line: selected!.key,
+    }),
+  };
 }
 
 async function searchWithCache(
@@ -224,16 +245,15 @@ async function fetchAndCacheSearchPage(
     }
 
     const allResults = data.list.map((item: ApiSearchItem) => {
-      const { episodes, titles } = item.vod_play_url
-        ? parseVodPlayUrl(item.vod_play_url)
-        : { episodes: [], titles: [] };
+      const playback = item.vod_play_url
+        ? parseVodPlayUrl(item.vod_play_url, item.vod_play_from)
+        : { episodes: [], episodes_titles: [] };
 
       return {
         id: item.vod_id.toString(),
         title: normalizeInlineText(item.vod_name),
         poster: item.vod_pic,
-        episodes,
-        episodes_titles: titles,
+        ...playback,
         source: apiSite.key,
         source_name: apiSite.name,
         class: item.vod_class,
@@ -244,7 +264,7 @@ async function fetchAndCacheSearchPage(
         type_name: item.type_name,
         series_status: parseSeriesStatus({
           ...item,
-          episodeCount: episodes.length,
+          episodeCount: playback.episodes.length,
         }),
         douban_id: item.vod_douban_id,
       };
@@ -575,10 +595,10 @@ async function getDetailFromVodApi(
     }
 
     const videoDetail = data.list[0];
-    const { episodes: parsedEpisodes, titles } = videoDetail.vod_play_url
-      ? parseVodPlayUrl(videoDetail.vod_play_url)
-      : { episodes: [], titles: [] };
-    let episodes = parsedEpisodes;
+    const playback = videoDetail.vod_play_url
+      ? parseVodPlayUrl(videoDetail.vod_play_url, videoDetail.vod_play_from)
+      : { episodes: [], episodes_titles: [] };
+    let episodes = playback.episodes;
 
     if (episodes.length === 0 && videoDetail.vod_content) {
       const matches = videoDetail.vod_content.match(PLAYBACK_URL_PATTERN) || [];
@@ -589,8 +609,8 @@ async function getDetailFromVodApi(
       id: id.toString(),
       title: normalizeInlineText(videoDetail.vod_name),
       poster: videoDetail.vod_pic,
+      ...playback,
       episodes,
-      episodes_titles: titles,
       source: apiSite.key,
       source_name: apiSite.name,
       class: videoDetail.vod_class,

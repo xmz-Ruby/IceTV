@@ -10,10 +10,13 @@ import type {
   PlaybackRequestMode,
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
+import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { shouldInheritCrossGroupProgress } from '@/features/play/lib/episodeGroups';
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
+import { resolvePlaybackLineSwitch } from '@/features/play/lib/playbackLines';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { showToast } from '@/lib/toast';
 import { SearchResult } from '@/lib/types';
 
 interface UseEpisodeSwitchOptions {
@@ -33,6 +36,7 @@ interface UseEpisodeSwitchOptions {
   setVideoLoadingAttempt: Dispatch<SetStateAction<number>>;
   setRealtimeLoadSpeed: Dispatch<SetStateAction<string>>;
   setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>;
+  setDetail: Dispatch<SetStateAction<SearchResult | null>>;
 }
 
 interface EpisodeSwitchHandlers {
@@ -40,6 +44,7 @@ interface EpisodeSwitchHandlers {
   handleEpisodeChange: (episodeNumber: number) => void;
   handlePreviousEpisode: () => void;
   handleNextEpisode: () => void;
+  handlePlaybackLineChange: (key: string) => void;
 }
 
 export function useEpisodeSwitch({
@@ -59,10 +64,11 @@ export function useEpisodeSwitch({
   setVideoLoadingAttempt,
   setRealtimeLoadSpeed,
   setCurrentEpisodeIndex,
+  setDetail,
 }: UseEpisodeSwitchOptions): EpisodeSwitchHandlers {
   const switchEpisode = useCallback(
-    (targetEpisodeIndex: number) => {
-      const d = detailRef.current;
+    (targetEpisodeIndex: number, nextDetail?: SearchResult) => {
+      const d = nextDetail || detailRef.current;
       if (!d?.episodes || targetEpisodeIndex < 0) {
         return;
       }
@@ -71,26 +77,44 @@ export function useEpisodeSwitch({
         return;
       }
 
-      if (targetEpisodeIndex === currentEpisodeIndexRef.current) {
+      if (
+        targetEpisodeIndex === currentEpisodeIndexRef.current &&
+        !nextDetail
+      ) {
         return;
       }
 
-      // 仅在 giri 源站不同分组之间切换同一集时继承当前播放时间点
-      const inheritedResumeTime = shouldInheritCrossGroupProgress(
-        d,
-        currentEpisodeIndexRef.current,
-        targetEpisodeIndex,
-      )
-        ? Math.floor(
-            resolveSourceSwitchCurrentPlayTime({
-              playerCurrentTime: artPlayerRef.current?.currentTime || 0,
-              pendingResumeTime: resumeTimeRef.current,
-              stableCurrentTime: stableCurrentTimeRef.current,
-            }),
-          )
-        : 0;
+      const samePlaybackUrl =
+        nextDetail &&
+        detailRef.current?.episodes[currentEpisodeIndexRef.current] ===
+          nextDetail.episodes[targetEpisodeIndex];
+      const inheritedResumeTime =
+        nextDetail ||
+        shouldInheritCrossGroupProgress(
+          d,
+          currentEpisodeIndexRef.current,
+          targetEpisodeIndex,
+        )
+          ? Math.floor(
+              resolveSourceSwitchCurrentPlayTime({
+                playerCurrentTime: artPlayerRef.current?.currentTime || 0,
+                pendingResumeTime: resumeTimeRef.current,
+                stableCurrentTime: stableCurrentTimeRef.current,
+              }),
+            )
+          : 0;
 
       doSaveCurrentProgress();
+      if (nextDetail) {
+        detailRef.current = nextDetail;
+        setDetail(nextDetail);
+        saveDetailSnapshot(nextDetail.source, nextDetail.id, nextDetail);
+      }
+      if (samePlaybackUrl) {
+        currentEpisodeIndexRef.current = targetEpisodeIndex;
+        setCurrentEpisodeIndex(targetEpisodeIndex);
+        return;
+      }
       sourceSwitchEpisodeAnchorRef.current = null;
       playbackRequestModeRef.current = 'episode';
       clearTargetEpisodeProgressRef.current = true;
@@ -103,7 +127,9 @@ export function useEpisodeSwitch({
       setIsVideoLoading(true);
       setVideoLoadingStage('episodeChanging');
       setVideoLoadingAttempt((prev) => prev + 1);
-      setRealtimeLoadSpeed('正在切换剧集...');
+      setRealtimeLoadSpeed(
+        nextDetail ? '正在切换播放线路...' : '正在切换剧集...',
+      );
       setCurrentEpisodeIndex(targetEpisodeIndex);
     },
     [
@@ -123,6 +149,7 @@ export function useEpisodeSwitch({
       setVideoLoadingAttempt,
       setRealtimeLoadSpeed,
       setCurrentEpisodeIndex,
+      setDetail,
     ],
   );
 
@@ -141,10 +168,29 @@ export function useEpisodeSwitch({
     switchEpisode(currentEpisodeIndexRef.current + 1);
   }, [switchEpisode, currentEpisodeIndexRef]);
 
+  const handlePlaybackLineChange = useCallback(
+    (key: string) => {
+      const detail = detailRef.current;
+      if (!detail || detail.playback_line === key) return;
+      const target = resolvePlaybackLineSwitch(
+        detail,
+        currentEpisodeIndexRef.current,
+        key,
+      );
+      if (!target) {
+        showToast('该线路缺少当前剧集，已保留当前播放', 'notice');
+        return;
+      }
+      switchEpisode(target.episodeIndex, target.detail);
+    },
+    [detailRef, currentEpisodeIndexRef, switchEpisode],
+  );
+
   return {
     switchEpisode,
     handleEpisodeChange,
     handlePreviousEpisode,
     handleNextEpisode,
+    handlePlaybackLineChange,
   };
 }

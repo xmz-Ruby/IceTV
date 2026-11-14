@@ -10,7 +10,7 @@ const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 const DETAIL_FRESH_MS = IS_DEVELOPMENT ? 10 * 1000 : 10 * 60 * 1000;
 const DETAIL_STALE_MS = IS_DEVELOPMENT ? 10 * 1000 : 20 * 60 * 1000;
 const DETAIL_CACHE = createSharedServerCache<SearchResult>({
-  name: 'detail',
+  name: 'detail-v2',
   freshMs: DETAIL_FRESH_MS,
   staleMs: DETAIL_STALE_MS,
   ...getServerCacheBudget('detail'),

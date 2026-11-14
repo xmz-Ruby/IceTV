@@ -291,6 +291,7 @@ function AuthenticatedPlayPageClient({
     currentId,
     currentSourceRef,
     currentIdRef,
+    detailRef,
     playbackStartedSourceRef,
     videoTitle,
     searchTitle,
@@ -372,25 +373,30 @@ function AuthenticatedPlayPageClient({
     stableCurrentTimeRef,
   });
 
-  const { handleEpisodeChange, handlePreviousEpisode, handleNextEpisode } =
-    useEpisodeSwitch({
-      artPlayerRef,
-      detailRef,
-      currentEpisodeIndexRef,
-      resumeTimeRef,
-      resumeModeRef,
-      stableCurrentTimeRef,
-      clearTargetEpisodeProgressRef,
-      sourceSwitchEpisodeAnchorRef,
-      playbackRequestModeRef,
-      doSaveCurrentProgress,
-      setError,
-      setIsVideoLoading,
-      setVideoLoadingStage,
-      setVideoLoadingAttempt,
-      setRealtimeLoadSpeed,
-      setCurrentEpisodeIndex,
-    });
+  const {
+    handleEpisodeChange,
+    handlePreviousEpisode,
+    handleNextEpisode,
+    handlePlaybackLineChange,
+  } = useEpisodeSwitch({
+    artPlayerRef,
+    detailRef,
+    currentEpisodeIndexRef,
+    resumeTimeRef,
+    resumeModeRef,
+    stableCurrentTimeRef,
+    clearTargetEpisodeProgressRef,
+    sourceSwitchEpisodeAnchorRef,
+    playbackRequestModeRef,
+    doSaveCurrentProgress,
+    setError,
+    setIsVideoLoading,
+    setVideoLoadingStage,
+    setVideoLoadingAttempt,
+    setRealtimeLoadSpeed,
+    setCurrentEpisodeIndex,
+    setDetail,
+  });
 
   const { handleToggleFavorite } = usePlayFavorite({
     currentSource,
@@ -524,6 +530,15 @@ function AuthenticatedPlayPageClient({
     if (currentEpisodeIndexRef.current !== previousIndex)
       resetAutoSourceSwitch();
   }, [handleNextEpisode, resetAutoSourceSwitch, currentEpisodeIndexRef]);
+
+  const handlePlaybackLineChangeRequest = useCallback(
+    (key: string) => {
+      const previousDetail = detailRef.current;
+      handlePlaybackLineChange(key);
+      if (detailRef.current !== previousDetail) resetAutoSourceSwitch();
+    },
+    [detailRef, handlePlaybackLineChange, resetAutoSourceSwitch],
+  );
 
   usePlayerKeyboard({
     artPlayerRef,
@@ -875,6 +890,7 @@ function AuthenticatedPlayPageClient({
       onReloginAndRecover={handleReloginAndRecover}
       onDismissAuthRecovery={dismissAuthRecovery}
       onEpisodeChange={handleEpisodeChangeRequest}
+      onPlaybackLineChange={handlePlaybackLineChangeRequest}
       onRetryPlayback={handleRetryPlayback}
       onSourceChange={handleSourceChange}
       currentSource={currentSource}

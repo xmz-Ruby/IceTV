@@ -7,6 +7,7 @@ import PlayerStateOverlay, {
   PLAYER_OVERLAY_SECONDARY_BUTTON_CLASS,
 } from '@/components/PlayerStateOverlay';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import Select from '@/components/Select';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
 import type {
   SourceRecommendation,
@@ -43,6 +44,7 @@ interface PlayMainContentProps {
   onReloginAndRecover: () => void;
   onDismissAuthRecovery: () => void;
   onEpisodeChange: (episodeNumber: number) => void;
+  onPlaybackLineChange?: (key: string) => void;
   onRetryPlayback: () => void;
   onSourceChange: (newSource: string, newId: string, newTitle: string) => void;
   currentSource: string;
@@ -228,6 +230,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onReloginAndRecover,
     onDismissAuthRecovery,
     onEpisodeChange,
+    onPlaybackLineChange,
     onRetryPlayback,
     onSourceChange,
     currentSource,
@@ -385,6 +388,28 @@ export function PlayMainContent(props: PlayMainContentProps) {
           : null
       }
       mobilePanelAlwaysVisible
+      playerToolbar={
+        detail?.playback_lines &&
+        detail.playback_lines.length > 1 &&
+        onPlaybackLineChange ? (
+          <>
+            <span className='flex-shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400'>
+              播放线路
+            </span>
+            <Select
+              ariaLabel='播放线路'
+              variant='pill'
+              className='min-w-0 [&_button>span]:truncate [&_button]:max-w-full'
+              value={detail.playback_line || ''}
+              onChange={onPlaybackLineChange}
+              options={detail.playback_lines.map((line, index) => ({
+                value: line.key,
+                label: `${index + 1}. ${line.label} · ${line.episodes.length}集`,
+              }))}
+            />
+          </>
+        ) : null
+      }
       playerOverlay={
         <>
           <PlayLoadingOverlay

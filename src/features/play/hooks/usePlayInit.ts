@@ -30,6 +30,7 @@ import {
   peekResolvedLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
+import { retainPlaybackLine } from '@/features/play/lib/playbackLines';
 import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
@@ -568,6 +569,7 @@ interface UsePlayInitParams {
   currentId: string;
   currentSourceRef: MutableRefObject<string>;
   currentIdRef: MutableRefObject<string>;
+  detailRef?: MutableRefObject<SearchResult | null>;
   // 页面最近一次真实起播的源，后台测速据此跳过正在播放的当前源
   playbackStartedSourceRef: MutableRefObject<Pick<
     SearchResult,
@@ -618,6 +620,7 @@ export function usePlayInit({
   currentId,
   currentSourceRef,
   currentIdRef,
+  detailRef,
   playbackStartedSourceRef,
   videoTitle,
   searchTitle,
@@ -653,6 +656,7 @@ export function usePlayInit({
     currentIdRef,
     currentSource,
     currentSourceRef,
+    detailRef,
     historyRestoreGateRef,
     needPreferRef,
     optimizationEnabled,
@@ -693,6 +697,7 @@ export function usePlayInit({
       currentIdRef,
       currentSource,
       currentSourceRef,
+      detailRef,
       historyRestoreGateRef,
       needPreferRef,
       optimizationEnabled,
@@ -733,7 +738,15 @@ export function usePlayInit({
       if (!detailResponse.ok) {
         throw new Error('获取视频详情失败');
       }
-      const detailData = (await detailResponse.json()) as SearchResult;
+      const rawDetail = (await detailResponse.json()) as SearchResult;
+      const active = detailRef?.current;
+      const previous =
+        active?.source === source && active.id === id
+          ? active
+          : readDetailSnapshot(source, id);
+      const detailData = previous
+        ? retainPlaybackLine(previous, rawDetail)
+        : rawDetail;
       setCachedDetail(source, id, detailData);
       saveDetailSnapshot(source, id, detailData);
       return detailData;
@@ -746,22 +759,26 @@ export function usePlayInit({
       snapshot: SearchResult,
     ) => {
       void fetchDetailData(source, id)
-        .then((fresh) => {
+        .then((data) => {
           if (signal.aborted) return;
-          if (!fresh.episodes || fresh.episodes.length === 0) return;
-          if (!hasDetailContentChange(snapshot, fresh)) return;
+          if (!data.episodes || data.episodes.length === 0) return;
+          const active = detailRef?.current;
+          const previous =
+            active?.source === source && active.id === id ? active : snapshot;
+          const fresh = retainPlaybackLine(previous, data);
+          if (!hasDetailContentChange(previous, fresh)) return;
           // 历史恢复可能已按快照的分组结构定下集索引，换成新详情时须同步换算，否则分组源会退到上一集
           if (
             currentSourceRef.current === source &&
             currentIdRef.current === id
           ) {
             setCurrentEpisodeIndex((index) =>
-              remapEpisodeIndexToDetail(snapshot, fresh, index),
+              remapEpisodeIndexToDetail(previous, fresh, index),
             );
           }
           setDetail((prev) =>
             prev && prev.source === source && prev.id === id
-              ? mergeSourceResult(fresh, prev)
+              ? mergeSourceResult(retainPlaybackLine(prev, fresh), prev)
               : prev,
           );
           setAvailableSources((prev) => mergeSourceBundle(prev, fresh));
@@ -789,11 +806,11 @@ export function usePlayInit({
     ): Promise<SearchResult | null> => {
       try {
         const cached = getCachedDetail(source, id);
+        const snapshot = readDetailSnapshot(source, id);
         if (cached) {
           if (!signal.aborted) setSourceSearchLoading(false);
-          return cached;
+          return snapshot ? retainPlaybackLine(snapshot, cached) : cached;
         }
-        const snapshot = readDetailSnapshot(source, id);
         if (snapshot) {
           if (!signal.aborted) setSourceSearchLoading(false);
           revalidateDetailSnapshot(source, id, snapshot);
@@ -1046,7 +1063,13 @@ export function usePlayInit({
           : null;
         if (signal.aborted) return;
 
-        const quickDetail = quickData?.detail;
+        const quickSnapshot = quickData?.detail
+          ? readDetailSnapshot(quickData.detail.source, quickData.detail.id)
+          : null;
+        const quickDetail =
+          quickSnapshot && quickData?.detail
+            ? retainPlaybackLine(quickSnapshot, quickData.detail)
+            : quickData?.detail;
         if (quickDetail?.episodes && quickDetail.episodes.length > 0) {
           requestStartupRecords([quickDetail]);
           const quickSources = quickData?.sources || [quickDetail];

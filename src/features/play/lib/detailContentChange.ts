@@ -13,6 +13,8 @@ export function hasDetailContentChange(
   return (
     next.episodes.length !== prev.episodes.length ||
     getEpisodeGroupsSignature(next) !== getEpisodeGroupsSignature(prev) ||
+    JSON.stringify(next.playback_lines) !==
+      JSON.stringify(prev.playback_lines) ||
     (!!next.title && next.title !== prev.title)
   );
 }

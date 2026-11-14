@@ -1047,6 +1047,13 @@ export interface EpisodeGroup {
   count: number;
 }
 
+export interface VodPlaybackLine {
+  key: string;
+  label: string;
+  episodes: string[];
+  episodes_titles: string[];
+}
+
 export interface SearchResult {
   id: string;
   title: string;
@@ -1064,6 +1071,8 @@ export interface SearchResult {
   douban_id?: number;
   related_sources?: SearchResult[];
   episode_groups?: EpisodeGroup[];
+  playback_lines?: VodPlaybackLine[];
+  playback_line?: string;
 }
 
 // 豆瓣数据结构

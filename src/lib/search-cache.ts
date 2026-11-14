@@ -50,7 +50,7 @@ const SEARCH_EMPTY_CACHE = createSwrCache<CachedPageEntry>({
 });
 const SEARCH_AGGREGATE_CACHE =
   createSharedServerCache<CachedSearchAggregateEntry>({
-    name: 'search-aggregates-v2',
+    name: 'search-aggregates-v3',
     ...getServerCacheBudget('search-aggregates'),
     freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
     staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,
@@ -59,7 +59,7 @@ const SEARCH_AGGREGATE_CACHE =
   });
 const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
 const SHARED_SEARCH_PAGES = createSharedServerCache<SearchPageLoadResult>({
-  name: 'search-page-shared-v1',
+  name: 'search-page-shared-v2',
   ...getServerCacheBudget('search-empty-pages'),
   freshMs: 60_000,
   staleMs: 0,
