@@ -433,17 +433,20 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           '',
         )}&id=${actualId.replace('live_', '')}`;
       }
+      if (
+        (playsByTitle || (from === 'search' && isAggregate)) &&
+        isTmdbSubjectEntryEnabled()
+      ) {
+        saveAggregateGroup();
+        return buildSubjectPageUrl({
+          title: actualTitle,
+          year: actualYear,
+          type: actualSearchType,
+          doubanId: actualDoubanId,
+          poster: actualPoster,
+        });
+      }
       if (playsByTitle) {
-        // 用户在本地设置启用 TMDB 时豆瓣/目录收藏卡片先进详情页选季选集（「继续观看」由详情页提供）
-        if (isTmdbSubjectEntryEnabled()) {
-          return buildSubjectPageUrl({
-            title: actualTitle,
-            year: actualYear,
-            type: actualSearchType,
-            doubanId: actualDoubanId,
-            poster: actualPoster,
-          });
-        }
         const localTarget = findLocalPlaybackTargetByTitle(
           actualTitle,
           actualYear,
@@ -486,6 +489,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       return null;
     }, [
       origin,
+      from,
       playsByTitle,
       actualSource,
       actualId,

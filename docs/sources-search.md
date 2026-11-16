@@ -4,7 +4,7 @@
 
 ## 搜索
 
-- 搜索页双视图（`SearchPageClient`）：TMDB 生效（本地设置 + 站点 env 默认，判定见 [TMDB](tmdb.md)）时关键词先进 TMDB 结果整页（`TmdbSearchResults`，浏览器直连 multi 搜索，点结果带 `tmdbId` 进 `/subject`）；TMDB 空/出错自动 `router.replace` 到 `&view=source` 并轻提示，底部「在全部片源中搜索」随时手动切换。`view=source` 与未启用 TMDB 时直接源聚合视图，行为与旧版一致。`useSearchExecution` 的 `enabled` 参数门控源搜索流的启动：TMDB 视图下不起 SSE，切回源视图时按依赖变化自动开跑，快照缓存逻辑不变。
+- 搜索页双视图（`SearchPageClient`）：TMDB 生效（本地设置 + 站点 env 默认，判定见 [TMDB](tmdb.md)）时关键词先进 TMDB 结果整页（`TmdbSearchResults`，浏览器直连 multi 搜索，点结果带 `tmdbId` 进 `/subject`）；TMDB 空/出错自动 `router.replace` 到 `&view=source` 并轻提示，底部「在全部片源中搜索」随时手动切换。`view=source` 与未启用 TMDB 时直接源聚合视图。聚合卡在 TMDB 生效时同样先进 `/subject` 复用标题匹配（不伪造 tmdbId），普通单源卡仍直接播放；未启用时保留原聚合播放路径，匹配失败的详情页提供直接搜索播放出口。`useSearchExecution` 的 `enabled` 参数门控源搜索流的启动：TMDB 视图下不起 SSE，切回源视图时按依赖变化自动开跑，快照缓存逻辑不变。
 
 - 聚合执行 `runSearchAggregation()`，聚合缓存 `src/lib/search-cache.ts`，失败源冷却 `src/lib/search-aggregate.ts`。不要在页面层重新实现聚合、缓存或失败冷却。
 - `/api/search` 命中新鲜缓存直接返回；命中过期缓存先返回旧结果再后台刷新。

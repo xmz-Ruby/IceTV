@@ -40,7 +40,7 @@
 - 页面：`src/app/subject/`（`AuthenticatedRoute` 挂 layout），客户端组件在 `src/features/tmdb/components/`。登录后的页面外壳由 `SubjectPageClient` 与 `SubjectSkeleton` 自带 `PageLayout`（`AuthenticatedRoute` 只在门禁态包外壳），漏了会整页无顶栏、无返回按钮。骨架与真实组件共用 `subject-layout.ts` 布局常量；TMDB 请求全部由浏览器直发（`tmdb-client.ts`），图片直连图片 host（`tmdbImageUrl()`）。
 - `/subject` 两种进入方式：豆瓣海报走标题匹配（`resolveBestTmdbMatch`）；搜索 TMDB 结果带 **`tmdbId` 直进**（跳过匹配按 id 拉详情），关键词季标记解析出的季号经 **`season`** 参数传给初始季推断（`inferInitialSeason` 取标题季标记与 season 参数的较大者）。
 - 源匹配面板（`SourceMatchPanel`）：首个命中源 5s 倒计时自动播放，任意点击/关闭打断。
-- 海报入口集中在 `usePosterPlay` 与 `VideoCard` 的 `playsByTitle` 分支（判定函数 `isTmdbSubjectEntryEnabled()`，读生效配置）：启用时跳 `/subject`（本地观看记录的「继续观看」由详情页提供，入口不再短路直跳）；**聚合搜索卡的源结果分支不变**，仍直接进播放页。
+- 海报入口集中在 `usePosterPlay` 与 `VideoCard` 的 `playsByTitle` 分支（判定函数 `isTmdbSubjectEntryEnabled()`，读生效配置）：启用时跳 `/subject`（本地观看记录的「继续观看」由详情页提供，入口不再短路直跳）；搜索聚合卡也经 `VideoCard` 跳详情页，复用标题匹配并保留聚合源组；单源搜索卡仍直接进播放页。
 - **搜索入口**（对齐手机版搜索页）：TMDB 生效时 `/search?q=` 默认渲染 TMDB 结果整页（`TmdbSearchResults`，见[源站与搜索](sources-search.md#搜索)）；空/出错自动落到源聚合，`view=source` 强制源视图。与手机版的有意偏差：**不做豆瓣层**（本站豆瓣体系只有分类浏览、无关键词搜索接口）、**过滤 person 结果**（无演员页）、**不做单结果自动进详情**（web 以 URL 驱动，列表更可预期）。
 
 ## 多画质结论

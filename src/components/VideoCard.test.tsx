@@ -10,6 +10,7 @@ import {
   saveFavorite,
   setPlayRecordTracking,
 } from '@/lib/db.client';
+import { writeTmdbSettings } from '@/lib/tmdb-preferences';
 import { showToast } from '@/lib/toast';
 import type { SearchResult } from '@/lib/types';
 
@@ -61,8 +62,9 @@ jest.mock('@/features/play/lib/danmaku/navigation-warmup', () => ({
 jest.mock('@/hooks/useLongPress', () => ({
   useLongPress: () => ({}),
 }));
+const mockPush = jest.fn();
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ prefetch: jest.fn(), push: jest.fn() }),
+  useRouter: () => ({ prefetch: jest.fn(), push: mockPush }),
 }));
 jest.mock('@/lib/db.client', () => ({
   ...jest.requireActual('@/lib/db.client'),
@@ -114,11 +116,31 @@ async function openMenu() {
 
 describe('VideoCard 多源聚合搜索结果', () => {
   beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    mockPush.mockClear();
+    delete window.RUNTIME_CONFIG;
     jest.mocked(showToast).mockClear();
     jest.mocked(getFavoriteForWork).mockReset();
     jest.mocked(saveFavorite).mockReset();
     jest.mocked(deleteFavorite).mockReset();
   });
+
+  it.each([true, false])(
+    '聚合卡按 TMDB 开关选择详情或原播放入口（开启=%p）',
+    (enabled) => {
+      writeTmdbSettings({ enabled, apiKey: 'test' });
+      renderAggregateCard();
+      fireEvent.click(screen.getByText('三体'));
+      const target = new URL(mockPush.mock.calls[0][0], 'http://localhost');
+      expect(target.pathname).toBe(enabled ? '/subject' : '/play');
+      expect(target.searchParams.get('title')).toBe('三体');
+      expect(target.searchParams.get('tmdbId')).toBeNull();
+      expect(
+        JSON.parse(sessionStorage.getItem('aggregate_group')!),
+      ).toHaveLength(2);
+    },
+  );
 
   it('年份与去重后的来源数显示在标题下方', () => {
     jest.mocked(getFavoriteForWork).mockResolvedValue(null);
