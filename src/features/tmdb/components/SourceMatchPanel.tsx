@@ -1,8 +1,13 @@
 'use client';
 
+import { X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import Spinner from '@/components/Spinner';
 import {
@@ -217,6 +222,17 @@ export function SourceMatchPanel({
             {countdown}s 后播放「{topMatched.result.source_name}」，点击立即播放
           </button>
         )}
+        <button
+          type='button'
+          aria-label='关闭片源匹配'
+          className={MODAL_CLOSE_BUTTON_CLASS}
+          onClick={() => {
+            cancelCountdown();
+            onClose();
+          }}
+        >
+          <X aria-hidden='true' className='h-4 w-4' />
+        </button>
       </div>
 
       <div className='min-h-0 flex-1 overflow-y-auto px-3 py-2'>
@@ -242,6 +258,20 @@ export function SourceMatchPanel({
           <p className='py-10 text-center text-sm text-gray-500 dark:text-gray-400'>
             没有检索到相关片源
           </p>
+        )}
+        {!loading && !error && !topMatched && (
+          <div className='space-y-3 py-4 text-center'>
+            <p className='text-sm text-gray-500 dark:text-gray-400'>
+              当前片源未找到这一集，可重新校验或返回选择其他剧集
+            </p>
+            <button
+              type='button'
+              onClick={() => runSearch()}
+              className={MODAL_SECONDARY_BUTTON_CLASS}
+            >
+              重新校验
+            </button>
+          </div>
         )}
         {!loading &&
           matches.map((item) => {

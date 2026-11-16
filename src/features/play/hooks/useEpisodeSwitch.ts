@@ -40,14 +40,15 @@ interface UseEpisodeSwitchOptions {
 }
 
 interface EpisodeSwitchHandlers {
-  switchEpisode: (targetEpisodeIndex: number) => void;
+  switchEpisode: (
+    targetEpisodeIndex: number,
+    detail?: SearchResult,
+    options?: { fromStart?: boolean },
+  ) => void;
   handleEpisodeChange: (episodeNumber: number) => void;
   handlePreviousEpisode: () => void;
   handleNextEpisode: () => void;
-  handlePlaybackLineChange: (
-    key: string,
-    options?: { auto?: boolean },
-  ) => void;
+  handlePlaybackLineChange: (key: string, options?: { auto?: boolean }) => void;
 }
 
 export function useEpisodeSwitch({
@@ -70,7 +71,11 @@ export function useEpisodeSwitch({
   setDetail,
 }: UseEpisodeSwitchOptions): EpisodeSwitchHandlers {
   const switchEpisode = useCallback(
-    (targetEpisodeIndex: number, nextDetail?: SearchResult) => {
+    (
+      targetEpisodeIndex: number,
+      nextDetail?: SearchResult,
+      options?: { fromStart?: boolean },
+    ) => {
       const d = nextDetail || detailRef.current;
       if (!d?.episodes || targetEpisodeIndex < 0) {
         return;
@@ -88,16 +93,18 @@ export function useEpisodeSwitch({
       }
 
       const samePlaybackUrl =
+        !options?.fromStart &&
         nextDetail &&
         detailRef.current?.episodes[currentEpisodeIndexRef.current] ===
           nextDetail.episodes[targetEpisodeIndex];
       const inheritedResumeTime =
-        nextDetail ||
-        shouldInheritCrossGroupProgress(
-          d,
-          currentEpisodeIndexRef.current,
-          targetEpisodeIndex,
-        )
+        !options?.fromStart &&
+        (nextDetail ||
+          shouldInheritCrossGroupProgress(
+            d,
+            currentEpisodeIndexRef.current,
+            targetEpisodeIndex,
+          ))
           ? Math.floor(
               resolveSourceSwitchCurrentPlayTime({
                 playerCurrentTime: artPlayerRef.current?.currentTime || 0,
@@ -186,8 +193,7 @@ export function useEpisodeSwitch({
       }
       if (options?.auto) {
         const label =
-          detail.playback_lines?.find((line) => line.key === key)?.label ||
-          key;
+          detail.playback_lines?.find((line) => line.key === key)?.label || key;
         showToast(`当前线路播放失败，已切换线路「${label}」`, 'notice');
       }
       switchEpisode(target.episodeIndex, target.detail);

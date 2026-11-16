@@ -1005,6 +1005,52 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     );
   });
 
+  it('下一集按显式 TMDB 坐标换源，从头播放且不复制上一集时间', async () => {
+    const { result, options } = setupHook({
+      availableSources: [createSource('a', THREE_EPISODES)],
+      playerCurrentTime: 100,
+    });
+    const next = {
+      ...createSource('b', ['第2集', '第1集']),
+      title: '测试剧 第二季',
+    };
+    await result.current.handleSourceChange('b', 'b-id', next.title, {
+      detail: next,
+      nextEpisode: {
+        mediaKey: 'tv/95842',
+        title: '测试剧',
+        year: '2024',
+        target: {
+          season: 2,
+          episode: 1,
+          airDate: '',
+          episodeName: '',
+          seasonEpisodeCount: 2,
+          priorEpisodes: 3,
+          strippedTitle: '测试剧',
+          showYear: '2024',
+        },
+      },
+    });
+    expect(options.setCurrentSource).toHaveBeenCalledWith('b');
+    expect(options.currentEpisodeIndexRef.current).toBe(1);
+    expect(options.resumeTimeRef.current).toBe(0);
+    expect(options.stableCurrentTimeRef.current).toBe(0);
+    expect(options.clearTargetEpisodeProgressRef.current).toBe(true);
+    expect(options.tmdbCoordinateRef!.current).toMatchObject({
+      season: 2,
+      episode: 1,
+      source: 'b',
+      source_episode_index: 2,
+    });
+    expect(savePlayIntent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        resumeTime: 0,
+        tmdbCoordinate: expect.objectContaining({ season: 2, episode: 1 }),
+      }),
+    );
+  });
+
   it('地址栏改为新源，保留搜索参数，去掉起播专用参数，不沿用旧路由状态', async () => {
     const { result } = setupHook({
       availableSources: [

@@ -52,6 +52,10 @@ import {
 } from '@/features/play/lib/vodPlaybackIntent';
 import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import {
+  type TmdbPlaybackTarget,
+  matchTmdbPlaybackTarget,
+} from '@/features/tmdb/lib/next-episode';
+import {
   deletePlayRecord,
   deleteSkipConfig,
   saveSkipConfig,
@@ -302,7 +306,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       newSource: string,
       newId: string,
       newTitle: string,
-      switchOptions?: { auto?: boolean },
+      switchOptions?: {
+        auto?: boolean;
+        nextEpisode?: TmdbPlaybackTarget;
+        detail?: SearchResult;
+      },
     ) => {
       if (
         newSource === currentSourceRef.current &&
@@ -311,9 +319,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         return;
       }
 
-      const targetSource = availableSources.find(
-        (source) => source.source === newSource && source.id === newId,
-      );
+      const targetSource =
+        switchOptions?.detail ??
+        availableSources.find(
+          (source) => source.source === newSource && source.id === newId,
+        );
       if (!targetSource) {
         setError('未找到匹配结果');
         return;
@@ -391,6 +401,17 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         const clearTargetEpisodeProgress =
           clearTargetEpisodeProgressRef.current;
         const resolveSwitchTarget = (detail: SearchResult) => {
+          if (switchOptions?.nextEpisode) {
+            const match = matchTmdbPlaybackTarget(
+              detail,
+              switchOptions.nextEpisode,
+            );
+            return {
+              targetIndex: match?.episodeIndex ?? 0,
+              preserveProgress: false,
+              rejected: !match,
+            };
+          }
           const resolved = resolveEpisodeTargetIndex(
             episodeAnchor.detail,
             episodeAnchor.episodeIndex,
@@ -415,8 +436,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         // 懒解析源的搜索结果与详情的剧集结构可能不同，仍先等详情
         const candidateTarget = resolveSwitchTarget(newDetail);
         const commitBeforeDetail =
-          candidateTarget.preserveProgress &&
-          !isLazyEpisodeUrl(newDetail.episodes[candidateTarget.targetIndex]);
+          !!switchOptions?.nextEpisode ||
+          (candidateTarget.preserveProgress &&
+            !isLazyEpisodeUrl(newDetail.episodes[candidateTarget.targetIndex]));
 
         if (!commitBeforeDetail) {
           const config = getRuntimeConfig();
@@ -538,10 +560,16 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         }
 
         // 同一站点内切换版本不算对该源的偏好
-        if (!isAutoSwitch && newSource !== previousSource) {
+        if (
+          !isAutoSwitch &&
+          !switchOptions?.nextEpisode &&
+          newSource !== previousSource
+        ) {
           recordSourceManualSelection(newSource);
         }
-        sourceSwitchEpisodeAnchorRef.current = episodeAnchor;
+        sourceSwitchEpisodeAnchorRef.current = switchOptions?.nextEpisode
+          ? null
+          : episodeAnchor;
         if (preserveProgress) {
           carryOverDanmakuEpisodeMapping(
             [
@@ -577,11 +605,19 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         });
 
         const previousCoordinate = tmdbCoordinateRef?.current;
-        const nextCoordinate =
-          preserveProgress &&
-          previousCoordinate?.source === previousSource &&
-          previousCoordinate.video_id === previousId &&
-          previousCoordinate.source_episode_index === latestEpisodeIndex + 1
+        const nextCoordinate = switchOptions?.nextEpisode
+          ? {
+              media_key: switchOptions.nextEpisode.mediaKey,
+              season: switchOptions.nextEpisode.target.season,
+              episode: switchOptions.nextEpisode.target.episode,
+              source: newDetail.source,
+              video_id: newDetail.id,
+              source_episode_index: targetIndex + 1,
+            }
+          : preserveProgress &&
+              previousCoordinate?.source === previousSource &&
+              previousCoordinate.video_id === previousId &&
+              previousCoordinate.source_episode_index === latestEpisodeIndex + 1
             ? {
                 ...previousCoordinate,
                 source: newDetail.source,
@@ -601,6 +637,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
         resumeTimeRef.current = nextResumeState.resumeTime;
         resumeModeRef.current = nextResumeState.resumeMode;
+        if (switchOptions?.nextEpisode) {
+          clearTargetEpisodeProgressRef.current = true;
+          stableCurrentTimeRef.current = 0;
+        }
 
         const nextYear = hasDisplayText(newDetail.year)
           ? newDetail.year
@@ -636,11 +676,12 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             nextSource: newDetail.source,
             nextId: newDetail.id,
             previousSkipConfig,
-            keepPreviousPlayRecord: clearTargetEpisodeProgress,
+            keepPreviousPlayRecord:
+              clearTargetEpisodeProgress || !!switchOptions?.nextEpisode,
           };
         }
 
-        if (commitBeforeDetail) {
+        if (commitBeforeDetail && !switchOptions?.nextEpisode) {
           const committedDetail = newDetail;
           void (async () => {
             try {

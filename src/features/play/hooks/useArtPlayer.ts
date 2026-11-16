@@ -80,6 +80,21 @@ export function useArtPlayer(params: UseArtPlayerParams) {
       {
         ...latest,
         handleNextEpisode: () => paramsRef.current.handleNextEpisode(),
+        canAdvanceBeyondSource: () =>
+          paramsRef.current.canAdvanceBeyondSource?.() ?? false,
+        ...(latest.getNextEpisodePreloadUrl
+          ? {
+              getNextEpisodePreloadUrl: () =>
+                paramsRef.current.getNextEpisodePreloadUrl?.() ?? null,
+            }
+          : {}),
+        ...(latest.resolveNextEpisodePreloadUrl
+          ? {
+              resolveNextEpisodePreloadUrl: (signal: AbortSignal) =>
+                paramsRef.current.resolveNextEpisodePreloadUrl?.(signal) ??
+                Promise.resolve(null),
+            }
+          : {}),
         handleSkipConfigChange: (config) =>
           paramsRef.current.handleSkipConfigChange(config),
         saveCurrentPlayProgress: () =>

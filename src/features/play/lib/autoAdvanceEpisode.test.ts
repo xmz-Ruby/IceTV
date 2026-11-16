@@ -16,6 +16,31 @@ describe('shouldAutoAdvanceEpisode', () => {
     expect(shouldAutoAdvanceEpisode(READY_STATE)).toBe(true);
   });
 
+  it('TMDB 坐标允许在当前源季末发起下一集，但关闭自动连播仍禁止', () => {
+    expect(
+      shouldAutoAdvanceEpisode({
+        ...READY_STATE,
+        currentEpisodeIndex: 3,
+        allowSourceBoundary: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoAdvanceEpisode({
+        ...READY_STATE,
+        currentEpisodeIndex: 3,
+        allowSourceBoundary: true,
+        enabled: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoAdvanceEpisode({
+        ...READY_STATE,
+        currentEpisodeIndex: 4,
+        allowSourceBoundary: true,
+      }),
+    ).toBe(false);
+  });
+
   it.each([
     ['自动连播关闭', { enabled: false }],
     ['自动连播未就绪', { armed: false }],

@@ -4,6 +4,7 @@ interface AutoAdvanceEpisodeState {
   alreadyAdvanced: boolean;
   currentEpisodeIndex: number;
   episodeCount: number;
+  allowSourceBoundary?: boolean;
 }
 
 const MAX_PREMATURE_END_GAP_RATIO = 0.15;
@@ -39,12 +40,14 @@ export function shouldAutoAdvanceEpisode({
   alreadyAdvanced,
   currentEpisodeIndex,
   episodeCount,
+  allowSourceBoundary = false,
 }: AutoAdvanceEpisodeState): boolean {
   return (
     enabled &&
     armed &&
     !alreadyAdvanced &&
     currentEpisodeIndex >= 0 &&
-    currentEpisodeIndex < episodeCount - 1
+    currentEpisodeIndex < episodeCount &&
+    (allowSourceBoundary || currentEpisodeIndex < episodeCount - 1)
   );
 }

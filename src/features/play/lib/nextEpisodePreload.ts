@@ -425,7 +425,8 @@ export type NextEpisodePreloadOptions = {
   blockAdEnabledRef: RefLike<boolean>;
   skipConfigRef: RefLike<SkipConfigLike | null>;
   // 下一集的解析与清单缓存预热，每集最多执行一次
-  warmUp?: (signal: AbortSignal) => void;
+  warmUp?: (signal: AbortSignal, url: string) => void;
+  resolveNextEpisodeUrl?: (signal: AbortSignal) => Promise<string | null>;
 };
 
 type PreloadSession = {
@@ -488,8 +489,25 @@ function checkPreloadSession(session: PreloadSession): void {
     })
   ) {
     session.warmedUp = true;
-    options.warmUp?.(session.warmUpController.signal);
+    if (options.resolveNextEpisodeUrl) {
+      void options
+        .resolveNextEpisodeUrl(session.warmUpController.signal)
+        .then((url) => {
+          if (
+            !url ||
+            activeSession !== session ||
+            session.warmUpController.signal.aborted
+          )
+            return;
+          session.options.nextEpisodeUrl = url;
+          session.options.warmUp?.(session.warmUpController.signal, url);
+        })
+        .catch(() => {});
+    } else {
+      options.warmUp?.(session.warmUpController.signal, options.nextEpisodeUrl);
+    }
   }
+  if (!options.nextEpisodeUrl) return;
 
   const hls: HlsLike | null = getManagedVideo(video).hls ?? null;
   // 内存分片只由 hls.js 的 fLoader 消费，未接入时预载只会白占带宽
@@ -546,24 +564,28 @@ export function scheduleNextEpisodePreload(
   options: NextEpisodePreloadOptions,
 ): void {
   const { nextEpisodeUrl } = options;
-  const key = nextEpisodeUrl
-    ? [
-        options.sourceKey,
-        options.videoId,
-        options.episodeIndex,
-        nextEpisodeUrl,
-      ].join('\n')
-    : '';
-  if (nextEpisodeUrl && activeSession?.key === key) {
-    activeSession.options = { ...options, nextEpisodeUrl };
+  const key =
+    nextEpisodeUrl || options.resolveNextEpisodeUrl
+      ? [
+          options.sourceKey,
+          options.videoId,
+          options.episodeIndex,
+          nextEpisodeUrl || 'tmdb-coordinate',
+        ].join('\n')
+      : '';
+  if (key && activeSession?.key === key) {
+    activeSession.options = {
+      ...options,
+      nextEpisodeUrl: nextEpisodeUrl || activeSession.options.nextEpisodeUrl,
+    };
     return;
   }
 
   cancelNextEpisodePreload();
-  if (!nextEpisodeUrl || typeof window === 'undefined') return;
+  if (!key || typeof window === 'undefined') return;
   const session: PreloadSession = {
     key,
-    options: { ...options, nextEpisodeUrl },
+    options: { ...options, nextEpisodeUrl: nextEpisodeUrl || '' },
     warmedUp: false,
     warmUpController: new AbortController(),
     timer: null,

@@ -24,6 +24,7 @@ interface EpisodeHandlers {
   currentEpisodeIndexRef: MutableRefObject<number>;
   handlePreviousEpisode: () => void;
   handleNextEpisode: () => void;
+  canAdvanceBeyondSource?: () => boolean;
 }
 
 interface UsePlayerKeyboardParams {
@@ -178,7 +179,11 @@ export function usePlayerKeyboard({
         }
         return false;
       }
-      if (detail && index < detail.episodes.length - 1) {
+      if (
+        detail &&
+        (index < detail.episodes.length - 1 ||
+          episodeHandlers.canAdvanceBeyondSource?.())
+      ) {
         episodeHandlers.handleNextEpisode();
         return true;
       }

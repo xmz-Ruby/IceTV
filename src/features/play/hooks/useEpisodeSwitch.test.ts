@@ -135,6 +135,22 @@ it('同集索引不变时仍切换地址，快速切回时保留尚未恢复的�
   expect(params.setIsVideoLoading).toHaveBeenCalledTimes(2);
 });
 
+it('下一集切到同源另一线路时从头开始，上一集时间不继承', () => {
+  const params = options();
+  const { result } = renderHook(() => useEpisodeSwitch(params));
+  const next = {
+    ...detail,
+    episodes: detail.playback_lines![1].episodes,
+    episodes_titles: detail.playback_lines![1].episodes_titles,
+    playback_line: 'b:1',
+  };
+  act(() => result.current.switchEpisode(1, next, { fromStart: true }));
+  expect(params.resumeTimeRef.current).toBe(0);
+  expect(params.stableCurrentTimeRef.current).toBe(0);
+  expect(params.clearTargetEpisodeProgressRef.current).toBe(true);
+  expect(params.doSaveCurrentProgress).toHaveBeenCalledTimes(1);
+});
+
 it('重复选择当前线路不会中断播放', () => {
   const params = options();
   const { result } = renderHook(() => useEpisodeSwitch(params));

@@ -36,6 +36,7 @@ const mockSourceSwitch = {
 };
 
 jest.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: jest.fn() }),
   useSearchParams: () => mockSearchParams,
 }));
 

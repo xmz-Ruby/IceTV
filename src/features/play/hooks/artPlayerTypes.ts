@@ -57,6 +57,11 @@ export interface UseArtPlayerParams {
   setRealtimeLoadSpeed: Dispatch<SetStateAction<string>>;
   setBlockAdEnabled: Dispatch<SetStateAction<boolean>>;
   handleNextEpisode: () => void;
+  canAdvanceBeyondSource?: () => boolean;
+  getNextEpisodePreloadUrl?: () => string | null;
+  resolveNextEpisodePreloadUrl?: (
+    signal: AbortSignal,
+  ) => Promise<string | null>;
   handleSkipConfigChange: (newConfig: SkipConfig) => Promise<void>;
   saveCurrentPlayProgress: () => void;
   reportPlaybackStats?: (force?: boolean) => void;

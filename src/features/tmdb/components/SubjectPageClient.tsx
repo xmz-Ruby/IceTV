@@ -61,6 +61,11 @@ export function SubjectPageClient() {
   // 搜索结果直进：已有 TMDB id 时跳过标题匹配；season 是关键词季标记提示
   const tmdbIdParam = Number(searchParams.get('tmdbId')) || 0;
   const seasonHintParam = Number(searchParams.get('season')) || 0;
+  const verifyEpisode =
+    searchParams.get('verify') === '1'
+      ? Number(searchParams.get('episode')) || 0
+      : 0;
+  const verifiedRequestRef = useRef('');
 
   const [phase, setPhase] = useState<SubjectPhase>('resolving');
   const [fallbackReason, setFallbackReason] = useState('');
@@ -318,6 +323,33 @@ export function SubjectPageClient() {
       currentSeasonThemeNames,
     ],
   );
+
+  useEffect(() => {
+    if (
+      !match ||
+      match.mediaType !== 'tv' ||
+      selectedSeason !== seasonHintParam ||
+      !seasonEpisodes.data ||
+      seasonEpisodes.data.seasonNumber !== selectedSeason ||
+      verifyEpisode <= 0
+    )
+      return;
+    const key = `${match.id}:${selectedSeason}:${verifyEpisode}`;
+    if (verifiedRequestRef.current === key) return;
+    const episode = seasonEpisodes.data.episodes.find(
+      (item) => item.episode_number === verifyEpisode,
+    );
+    if (!episode) return;
+    verifiedRequestRef.current = key;
+    openPanelForEpisode(episode);
+  }, [
+    match,
+    openPanelForEpisode,
+    seasonEpisodes.data,
+    seasonHintParam,
+    selectedSeason,
+    verifyEpisode,
+  ]);
 
   const openPanelForMovie = useCallback(() => {
     setPanelTarget({

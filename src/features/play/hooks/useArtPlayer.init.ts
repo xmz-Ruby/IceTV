@@ -128,6 +128,9 @@ export async function initializeArtPlayer(
     setRealtimeLoadSpeed,
     setBlockAdEnabled,
     handleNextEpisode,
+    canAdvanceBeyondSource,
+    getNextEpisodePreloadUrl,
+    resolveNextEpisodePreloadUrl,
     handleSkipConfigChange,
     saveCurrentPlayProgress,
     startPlaybackStatsSession,
@@ -200,13 +203,11 @@ export async function initializeArtPlayer(
     }
     preconnectForUrl(videoUrl);
 
-    const nextEpisodeUrl =
-      detailRef.current?.episodes?.[currentEpisodeIndex + 1] ?? null;
-    const nextManifestPrefetchUrl =
-      nextEpisodeUrl && isVodM3u8Url(nextEpisodeUrl)
-        ? buildProxyUrl(nextEpisodeUrl)
-        : null;
+    const nextEpisodeUrl = getNextEpisodePreloadUrl
+      ? getNextEpisodePreloadUrl()
+      : (detailRef.current?.episodes?.[currentEpisodeIndex + 1] ?? null);
     scheduleNextEpisodePreload({
+      resolveNextEpisodeUrl: resolveNextEpisodePreloadUrl,
       sourceKey: preSourceKey,
       videoId: playbackInfoContext.id,
       episodeIndex: currentEpisodeIndex,
@@ -217,14 +218,18 @@ export async function initializeArtPlayer(
       autoPlayNextEnabledRef,
       blockAdEnabledRef,
       skipConfigRef,
-      warmUp: (signal) => {
+      warmUp: (signal, preparedUrl) => {
+        const nextEpisodeUrl = preparedUrl;
         if (!nextEpisodeUrl) return;
         if (isLazyEpisodeUrl(nextEpisodeUrl)) {
           prewarmLazyEpisodeUrl(preSourceKey, nextEpisodeUrl, signal);
           return;
         }
-        if (nextManifestPrefetchUrl) {
-          prefetchM3U8(nextManifestPrefetchUrl, playbackRoute);
+        const manifestUrl = isVodM3u8Url(nextEpisodeUrl)
+          ? buildProxyUrl(nextEpisodeUrl)
+          : null;
+        if (manifestUrl) {
+          prefetchM3U8(manifestUrl, playbackRoute);
         }
         preconnectForUrl(nextEpisodeUrl);
       },
@@ -559,6 +564,7 @@ export async function initializeArtPlayer(
           alreadyAdvanced: autoAdvancedRef.current,
           currentEpisodeIndex: episodeIndex,
           episodeCount: currentDetail?.episodes?.length ?? 0,
+          allowSourceBoundary: canAdvanceBeyondSource?.() ?? false,
         })
       ) {
         return false;

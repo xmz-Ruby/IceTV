@@ -562,6 +562,60 @@ describe('scheduleNextEpisodePreload', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('坐标解析完成后才预载确认的地址，未定位时不猜数组下一项', async () => {
+    const warmUp = jest.fn();
+    let finish!: (url: string | null) => void;
+    const resolveNextEpisodeUrl = jest.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const video = createVideo({ currentTime: 1_450 });
+    scheduleNextEpisodePreload(
+      createOptions(video, {
+        nextEpisodeUrl: null,
+        resolveNextEpisodeUrl,
+        warmUp,
+      }),
+    );
+    await tick();
+    expect(fetch).not.toHaveBeenCalled();
+    finish(NEXT_EPISODE_URL);
+    await tick();
+    expect(warmUp).toHaveBeenCalledWith(
+      expect.any(AbortSignal),
+      NEXT_EPISODE_URL,
+    );
+    await tick();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('换集取消尚未完成的坐标预载定位，迟到地址不预热', async () => {
+    const warmUp = jest.fn();
+    let finish!: (url: string | null) => void;
+    let signal!: AbortSignal;
+    scheduleNextEpisodePreload(
+      createOptions(createVideo(), {
+        nextEpisodeUrl: null,
+        warmUp,
+        resolveNextEpisodeUrl: (currentSignal) => {
+          signal = currentSignal;
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+      }),
+    );
+    await tick();
+    cancelNextEpisodePreload();
+    finish(NEXT_EPISODE_URL);
+    await tick();
+    expect(signal.aborted).toBe(true);
+    expect(warmUp).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('关闭连播时不预热下一集', async () => {
     const warmUp = jest.fn();
     const video = createVideo();

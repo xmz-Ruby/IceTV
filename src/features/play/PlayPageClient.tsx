@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   useCallback,
   useEffect,
@@ -27,6 +27,7 @@ import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourcePlaybackStatsRecorder } from '@/features/play/hooks/useSourcePlaybackStatsRecorder';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { useTmdbNextEpisode } from '@/features/play/hooks/useTmdbNextEpisode';
 import {
   applyDanmakuHeatmapVisibility,
   ensureDanmakuLoaded,
@@ -50,6 +51,7 @@ import {
   reportVodPlaybackOutcome,
 } from '@/features/play/lib/vodPlaybackIntent';
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
+import { resolveTmdbNextPreloadUrl } from '@/features/tmdb/lib/next-episode';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
@@ -62,6 +64,7 @@ import {
 import { destroyArtPlayer } from '@/lib/player-utils';
 import { preloadProxyModes } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
+import { isTmdbSubjectEntryEnabled } from '@/lib/subject-navigation';
 import { SearchResult } from '@/lib/types';
 
 const DIRECT_STARTUP_LOADING_DELAY_MS = 140;
@@ -85,6 +88,7 @@ function AuthenticatedPlayPageClient({
   initialDanmakuEnabled: boolean | null;
 }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const goBack = useBackNavigation('/');
 
   useEffect(() => {
@@ -376,6 +380,7 @@ function AuthenticatedPlayPageClient({
   });
 
   const {
+    switchEpisode,
     handleEpisodeChange,
     handlePreviousEpisode,
     handleNextEpisode,
@@ -506,11 +511,29 @@ function AuthenticatedPlayPageClient({
     handlePlaybackLineChange,
   });
 
+  const cancelTmdbNextRef = useRef<(() => void) | null>(null);
   const resetAutoSourceSwitch = useCallback(() => {
+    cancelTmdbNextRef.current?.();
     holdBackgroundSourceProbes();
     resetSourceSwitchIntent();
   }, [resetSourceSwitchIntent]);
   resetAutoSourceSwitchRef.current = resetAutoSourceSwitch;
+
+  const { advance: advanceTmdbEpisode, cancel: cancelTmdbNext } =
+    useTmdbNextEpisode({
+      detail,
+      episodeIndex: currentEpisodeIndex,
+      detailRef,
+      episodeIndexRef: currentEpisodeIndexRef,
+      coordinateRef: tmdbCoordinateRef,
+      availableSources,
+      saveProgress: doSaveCurrentProgress,
+      resetPlaybackIntent: resetAutoSourceSwitch,
+      switchEpisode,
+      changeSource: handleSourceChange,
+      navigate: (url) => router.replace(url),
+    });
+  cancelTmdbNextRef.current = cancelTmdbNext;
 
   // 选集中实际更新了集索引才开启新意图；同集和边界导航保留仍在运行的播放器。
   const handleEpisodeChangeRequest = useCallback(
@@ -529,11 +552,17 @@ function AuthenticatedPlayPageClient({
       resetAutoSourceSwitch();
   }, [handlePreviousEpisode, resetAutoSourceSwitch, currentEpisodeIndexRef]);
   const handleNextEpisodeRequest = useCallback(() => {
+    if (advanceTmdbEpisode()) return;
     const previousIndex = currentEpisodeIndexRef.current;
     handleNextEpisode();
     if (currentEpisodeIndexRef.current !== previousIndex)
       resetAutoSourceSwitch();
-  }, [handleNextEpisode, resetAutoSourceSwitch, currentEpisodeIndexRef]);
+  }, [
+    advanceTmdbEpisode,
+    handleNextEpisode,
+    resetAutoSourceSwitch,
+    currentEpisodeIndexRef,
+  ]);
 
   const handlePlaybackLineChangeRequest = useCallback(
     (key: string) => {
@@ -551,6 +580,7 @@ function AuthenticatedPlayPageClient({
       currentEpisodeIndexRef,
       handlePreviousEpisode: handlePreviousEpisodeRequest,
       handleNextEpisode: handleNextEpisodeRequest,
+      canAdvanceBeyondSource: isTmdbSubjectEntryEnabled,
     },
   });
 
@@ -763,6 +793,24 @@ function AuthenticatedPlayPageClient({
     setRealtimeLoadSpeed,
     setBlockAdEnabled,
     handleNextEpisode: handleNextEpisodeRequest,
+    canAdvanceBeyondSource: isTmdbSubjectEntryEnabled,
+    getNextEpisodePreloadUrl: () =>
+      isTmdbSubjectEntryEnabled()
+        ? null
+        : (detailRef.current?.episodes[currentEpisodeIndexRef.current + 1] ??
+          null),
+    resolveNextEpisodePreloadUrl: async (signal) => {
+      const detail = detailRef.current;
+      if (!detail) return null;
+      return isTmdbSubjectEntryEnabled()
+        ? resolveTmdbNextPreloadUrl(
+            detail,
+            currentEpisodeIndexRef.current,
+            tmdbCoordinateRef.current,
+            signal,
+          )
+        : (detail.episodes[currentEpisodeIndexRef.current + 1] ?? null);
+    },
     handleSkipConfigChange,
     saveCurrentPlayProgress: doSaveCurrentProgress,
     reportPlaybackStats,
@@ -896,7 +944,10 @@ function AuthenticatedPlayPageClient({
       onEpisodeChange={handleEpisodeChangeRequest}
       onPlaybackLineChange={handlePlaybackLineChangeRequest}
       onRetryPlayback={handleRetryPlayback}
-      onSourceChange={handleSourceChange}
+      onSourceChange={(...args) => {
+        cancelTmdbNext();
+        return handleSourceChange(...args);
+      }}
       currentSource={currentSource}
       currentId={currentId}
       searchTitle={searchTitle}
