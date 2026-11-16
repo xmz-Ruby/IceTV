@@ -65,6 +65,7 @@ import {
   type InviteCodePurge,
   type InviteCodeQuery,
 } from '@/lib/invite-code-storage';
+import { MESSAGE_NOTIFICATION_KINDS } from '@/lib/message-types';
 import { MysqlConfigStateStore } from '@/lib/mysql-config-state-store';
 import { MysqlInviteCodeStore } from '@/lib/mysql-invite-code-store';
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
@@ -94,7 +95,10 @@ import {
   userDanmakuSchema,
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
-import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
+  mergeUserMessageState,
+  muteAllNotificationKinds,
+} from '@/lib/user-message-state';
 import {
   accessPermissionsKey,
   configPermissionsChanged,
@@ -697,6 +701,7 @@ export class MySqlStorage implements IStorage {
     }
     await this.migratePlaybackSchema();
     await this.migrateReviewFirstPublished();
+    await this.migrateNotificationMutedDefault();
     await this.migrateWatchHistory();
     await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
@@ -748,6 +753,56 @@ export class MySqlStorage implements IStorage {
         await connection.execute(
           'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
           [Date.now(), 'review_first_published_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // 通知默认全关：把已保存过通知开关的用户一次性覆写为全部关闭
+  private async migrateNotificationMutedDefault(): Promise<void> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['notification_muted_default_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['notification_muted_default_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        const [rows] = await connection.query<JsonRow[]>(
+          'SELECT username, state_json FROM user_message_state',
+        );
+        for (const row of rows) {
+          const state = parseJsonValue<UserMessageState>(row.state_json);
+          // 未保存过 mutedKinds 的用户由默认解析覆盖，无需改写
+          if (!state?.mutedKinds) continue;
+          if (
+            state.mutedKinds.length === MESSAGE_NOTIFICATION_KINDS.length &&
+            state.mutedKinds.every((kind) =>
+              MESSAGE_NOTIFICATION_KINDS.includes(kind),
+            )
+          )
+            continue;
+          await connection.execute(
+            'UPDATE user_message_state SET state_json = ? WHERE username = ?',
+            [
+              JSON.stringify(muteAllNotificationKinds(state)),
+              String(row.username),
+            ],
+          );
+        }
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'notification_muted_default_v1'],
         );
       }
       await connection.commit();

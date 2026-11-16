@@ -2,6 +2,7 @@
 
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
 import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
+import { MESSAGE_NOTIFICATION_KINDS } from '@/lib/message-types';
 import { socialNotificationId } from '@/lib/social-notification-identity';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import { mergeUserMessageState } from '@/lib/user-message-state';
@@ -103,4 +104,66 @@ it('首次公开迁移原子回填旧时间，私密旧记录恢复公开不回�
   } finally {
     clock.mockRestore();
   }
+});
+
+it('未保存过设置默认全关，首次开启推进该类水位避免旧消息涌出', () => {
+  const reopened = mergeUserMessageState(
+    { followReviewReadAt: 50 },
+    {
+      notificationSettings: {
+        mutedKinds: [
+          'tracking-update',
+          'review-reply',
+          'new-follower',
+          'review-like',
+        ],
+        now: 100,
+      },
+    },
+  );
+  expect(reopened.mutedKinds).toEqual([
+    'tracking-update',
+    'review-reply',
+    'new-follower',
+    'review-like',
+  ]);
+  expect(reopened.followReviewReadAt).toBe(100);
+  // 仍然关闭的类型不推进水位
+  expect(reopened.reviewReplyReadAt).toBeUndefined();
+});
+
+it('通知默认全关迁移覆写已保存的开关、跳过未设置用户且幂等', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const impl = storage as unknown as {
+    db: import('better-sqlite3').Database;
+    migrateNotificationMutedDefault(): void;
+  };
+  await storage.updateUserMessageState('alice', {
+    notificationSettings: { mutedKinds: [], now: 100 },
+  });
+  await storage.updateUserMessageState('bob', {
+    notificationSettings: { mutedKinds: ['review-like'], now: 100 },
+  });
+  await storage.updateUserMessageState('carol', {
+    followReviewReadAt: 555,
+  });
+  impl.db.exec(
+    "DELETE FROM storage_migrations WHERE name = 'notification_muted_default_v1'",
+  );
+  impl.migrateNotificationMutedDefault();
+  expect((await storage.getUserMessageState('alice')).mutedKinds).toEqual([
+    ...MESSAGE_NOTIFICATION_KINDS,
+  ]);
+  expect((await storage.getUserMessageState('bob')).mutedKinds).toEqual([
+    ...MESSAGE_NOTIFICATION_KINDS,
+  ]);
+  // 未保存过开关的用户不改写，由默认解析覆盖
+  const carol = await storage.getUserMessageState('carol');
+  expect(carol.mutedKinds).toBeUndefined();
+  expect(carol.followReviewReadAt).toBe(555);
+  // marker 已写入，重复执行为 no-op
+  impl.migrateNotificationMutedDefault();
+  expect((await storage.getUserMessageState('alice')).mutedKinds).toEqual([
+    ...MESSAGE_NOTIFICATION_KINDS,
+  ]);
 });

@@ -3,6 +3,7 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { MESSAGE_NOTIFICATION_KINDS } from '@/lib/message-types';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 
 jest.mock('@/lib/api-auth', () => ({
@@ -37,7 +38,10 @@ it('设置读写均要求有效登录', async () => {
   expect((await route.PUT(request({ mutedKinds: [] }))).status).toBe(401);
 });
 it('读取默认设置、严格校验且去重', async () => {
-  expect(await (await route.GET(request())).json()).toEqual({ mutedKinds: [] });
+  // 未保存过设置的用户（含新注册）默认全部关闭
+  expect(await (await route.GET(request())).json()).toEqual({
+    mutedKinds: [...MESSAGE_NOTIFICATION_KINDS],
+  });
   for (const mutedKinds of [
     undefined,
     null,

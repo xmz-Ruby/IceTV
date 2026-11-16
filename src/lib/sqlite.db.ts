@@ -60,6 +60,7 @@ import {
   type InviteCodePurge,
   type InviteCodeQuery,
 } from '@/lib/invite-code-storage';
+import { MESSAGE_NOTIFICATION_KINDS } from '@/lib/message-types';
 import {
   type OAuthBindResult,
   type OAuthIdentity,
@@ -93,7 +94,10 @@ import {
   userDanmakuSchema,
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
-import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
+  mergeUserMessageState,
+  muteAllNotificationKinds,
+} from '@/lib/user-message-state';
 import {
   accessPermissionsKey,
   configPermissionsChanged,
@@ -616,6 +620,7 @@ export class LocalSqliteStorage implements IStorage {
     this.migrateFavoriteProjection();
     this.migratePlaybackSchema();
     this.migrateReviewFirstPublished();
+    this.migrateNotificationMutedDefault();
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -661,6 +666,46 @@ export class LocalSqliteStorage implements IStorage {
             'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
           )
           .run('review_first_published_v1', Date.now());
+      })
+      .immediate();
+  }
+
+  // 通知默认全关：把已保存过通知开关的用户一次性覆写为全部关闭
+  private migrateNotificationMutedDefault(): void {
+    this.db
+      .transaction(() => {
+        if (
+          this.db
+            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
+            .get('notification_muted_default_v1')
+        )
+          return;
+        const update = this.db.prepare(
+          'UPDATE user_message_state SET state_json = ? WHERE username = ?',
+        );
+        for (const row of this.db
+          .prepare('SELECT username, state_json FROM user_message_state')
+          .all() as { username: string; state_json: string }[]) {
+          const state = parseJsonValue<UserMessageState>(row.state_json);
+          // 未保存过 mutedKinds 的用户由默认解析覆盖，无需改写
+          if (!state?.mutedKinds) continue;
+          if (
+            state.mutedKinds.length === MESSAGE_NOTIFICATION_KINDS.length &&
+            state.mutedKinds.every((kind) =>
+              MESSAGE_NOTIFICATION_KINDS.includes(kind),
+            )
+          )
+            continue;
+          update.run(
+            JSON.stringify(muteAllNotificationKinds(state)),
+            row.username,
+          );
+        }
+        this.db
+          .prepare(
+            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
+          )
+          .run('notification_muted_default_v1', Date.now());
       })
       .immediate();
   }

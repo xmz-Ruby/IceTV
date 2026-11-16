@@ -17,6 +17,13 @@ export const MESSAGE_NOTIFICATION_KINDS: readonly MessageNotificationKind[] = [
   'review-like',
 ];
 
+// 未保存过通知设置（mutedKinds 未定义）时默认全部关闭，新注册用户即走此路径
+export function resolveMutedKinds(
+  state: Readonly<{ mutedKinds?: MessageNotificationKind[] }>,
+): readonly MessageNotificationKind[] {
+  return state.mutedKinds ?? MESSAGE_NOTIFICATION_KINDS;
+}
+
 export interface AnnualReportUserMessage {
   id: string;
   type: 'annual-report';

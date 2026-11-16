@@ -20,6 +20,7 @@ import {
   AnnouncementUserMessage,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
+  resolveMutedKinds,
   toMessageToastPreview,
   TrackingUpdateUserMessage,
   UserMessage,
@@ -148,7 +149,7 @@ async function getVisibleMessageSources(
   limit: number,
   before?: import('@/lib/message-cursor.server').MessageCursor | null,
 ) {
-  const muted = new Set(state.mutedKinds ?? []);
+  const muted = new Set(resolveMutedKinds(state));
   const now = Date.now();
   const query = { limit, before };
   const followArgs = [
@@ -454,7 +455,8 @@ export async function readUserMessage(
       : messageId.startsWith('follow-recap:')
         ? 'follow-review'
         : messageId.split(':')[0];
-  if (state.mutedKinds?.some((kind) => kind === messageKind)) return null;
+  if (resolveMutedKinds(state).some((kind) => kind === messageKind))
+    return null;
   for (const [kind, field] of [
     ['new-follower', 'newFollower'],
     ['review-like', 'reviewLike'],
@@ -596,7 +598,7 @@ export async function readAllUserMessages(
   });
 
   const updatedRecords: Record<string, PlayRecord> = {};
-  while (!state.mutedKinds?.includes('tracking-update')) {
+  while (!resolveMutedKinds(state).includes('tracking-update')) {
     const page = await db.getUnreadTrackingPlayRecordPage(
       userName,
       READ_ALL_BATCH_SIZE,
@@ -613,7 +615,7 @@ export async function readAllUserMessages(
   }
 
   let before: import('@/lib/message-cursor.server').MessageCursor | undefined;
-  while (!state.mutedKinds?.includes('tracking-update')) {
+  while (!resolveMutedKinds(state).includes('tracking-update')) {
     const page = await db.getFavoriteUpdateMessagePage(
       userName,
       READ_ALL_BATCH_SIZE,

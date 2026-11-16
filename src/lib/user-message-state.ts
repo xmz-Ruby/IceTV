@@ -1,10 +1,21 @@
 import { parseAnnouncementMessageId } from '@/lib/announcement-identity';
 import { parseFollowRecapMessageId } from '@/lib/annual-recap-identity';
 import { parseFollowReviewMessageId } from '@/lib/follow-review-identity';
+import {
+  MESSAGE_NOTIFICATION_KINDS,
+  resolveMutedKinds,
+} from '@/lib/message-types';
 import { parseReplyMessageId } from '@/lib/review-reply-storage';
 import { parseSocialNotificationId } from '@/lib/social-notification-identity';
 import type { UserMessageState, UserMessageStateUpdate } from '@/lib/types';
 import { parseUserNoticeId } from '@/lib/user-notice';
+
+// 一次性迁移用：把用户已保存的通知开关全部置为关闭
+export function muteAllNotificationKinds(
+  state: UserMessageState,
+): UserMessageState {
+  return { ...state, mutedKinds: [...MESSAGE_NOTIFICATION_KINDS] };
+}
 
 export function mergeUserMessageState(
   current: UserMessageState,
@@ -12,7 +23,7 @@ export function mergeUserMessageState(
 ): UserMessageState {
   if (update.notificationSettings) {
     const settings = update.notificationSettings;
-    const reopened = (current.mutedKinds ?? []).filter(
+    const reopened = resolveMutedKinds(current).filter(
       (kind) => !settings.mutedKinds.includes(kind),
     );
     // 在存储事务读到的最新状态上计算重新开启的水位，避免并发设置覆盖已读状态。

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { resolveMutedKinds } from '@/lib/message-types';
 import { validateMutedKinds } from '@/lib/social-notification-identity';
 import {
   socialBody,
@@ -16,8 +17,9 @@ export async function GET(request: NextRequest) {
     const guard = await requireActiveUser(request);
     if (isGuardFailure(guard)) return guard.response;
     return socialJson({
-      mutedKinds:
-        (await db.getUserMessageState(guard.username)).mutedKinds ?? [],
+      mutedKinds: [
+        ...resolveMutedKinds(await db.getUserMessageState(guard.username)),
+      ],
     });
   } catch (error) {
     return socialFailure(error);

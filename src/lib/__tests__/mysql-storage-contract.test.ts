@@ -76,6 +76,7 @@ type FakeState = {
   watchBuckets: Record<string, any>[];
   historyMigrated: boolean;
   reviewPublishedMigrated: boolean;
+  notificationMutedMigrated: boolean;
   searchHistory: SearchHistoryRow[];
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
@@ -128,6 +129,7 @@ function cloneState(state: FakeState): FakeState {
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
     historyMigrated: state.historyMigrated,
     reviewPublishedMigrated: state.reviewPublishedMigrated,
+    notificationMutedMigrated: state.notificationMutedMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
@@ -176,6 +178,7 @@ function createState(): FakeState {
     watchBuckets: [],
     historyMigrated: false,
     reviewPublishedMigrated: false,
+    notificationMutedMigrated: false,
     searchHistory: [],
     sourceRouteStats: [],
     adminConfig: null,
@@ -422,6 +425,8 @@ function createFakePool() {
     if (normalized.startsWith('UPDATE storage_migrations')) {
       if (params[1] === 'review_first_published_v1')
         currentState.reviewPublishedMigrated = true;
+      else if (params[1] === 'notification_muted_default_v1')
+        currentState.notificationMutedMigrated = true;
       else currentState.historyMigrated = true;
       return [{ affectedRows: 1 }, []];
     }
@@ -1692,7 +1697,9 @@ function createFakePool() {
             completed_at: (
               params[0] === 'review_first_published_v1'
                 ? currentState.reviewPublishedMigrated
-                : currentState.historyMigrated
+                : params[0] === 'notification_muted_default_v1'
+                  ? currentState.notificationMutedMigrated
+                  : currentState.historyMigrated
             )
               ? 1
               : 0,
@@ -2535,6 +2542,15 @@ function createFakePool() {
       const stateJson = currentState.messageStates.get(username);
       return [stateJson ? [{ state_json: stateJson }] : [], []];
     }
+
+    if (normalized === 'SELECT username, state_json FROM user_message_state')
+      return [
+        [...currentState.messageStates].map(([username, state_json]) => ({
+          username,
+          state_json,
+        })),
+        [],
+      ];
 
     if (
       normalized ===

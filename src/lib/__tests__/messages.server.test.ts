@@ -110,7 +110,7 @@ const updatedRecord: PlayRecord = {
 };
 
 function usePersistedUserMessageState(): void {
-  let state: UserMessageState = {};
+  let state: UserMessageState = { mutedKinds: [] };
   mockGetUserMessageState.mockImplementation(() => Promise.resolve(state));
   mockUpdateUserMessageState.mockImplementation(
     (_userName: string, update: UserMessageStateUpdate) => {
@@ -218,7 +218,7 @@ describe('messages server', () => {
       total: 1,
       nextCursor: null,
     });
-    mockGetUserMessageState.mockResolvedValue({});
+    mockGetUserMessageState.mockResolvedValue({ mutedKinds: [] });
     mockUpdateUserMessageState.mockResolvedValue(undefined);
     mockGetPlayRecord.mockResolvedValue(updatedRecord);
     mockSavePlayRecord.mockResolvedValue(undefined);
@@ -569,6 +569,7 @@ describe('messages server', () => {
     mockGetFollowReviewMessages.mockResolvedValue([followed]);
     mockGetFollowReviewMessageCount.mockResolvedValue(1);
     mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: [],
       followReviewReadIds: Array.from(
         { length: 200 },
         (_, i) => `follow-review:${i}`,
@@ -718,6 +719,7 @@ describe('messages server', () => {
 
   it('does not return an announcement after that version is read', async () => {
     mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: [],
       announcementReadIds: [ANNOUNCEMENT_ID],
     });
 
@@ -787,14 +789,17 @@ describe('messages server', () => {
       { ...announcementRow, id: 'a3', publishedAt: 6_000 },
       announcementRow,
     ]);
-    mockGetUserMessageState.mockResolvedValue({ announcementReadAt: 5_000 });
+    mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: [],
+      announcementReadAt: 5_000,
+    });
     const hidden = await getUserMessagePage('demo', 20);
     expect(hidden.items.map((message) => message.id)).toEqual([
       'announcement:6000:a3',
       expect.stringMatching(/^tracking:/),
     ]);
 
-    mockGetUserMessageState.mockResolvedValue({});
+    mockGetUserMessageState.mockResolvedValue({ mutedKinds: [] });
     const page = await getUserMessagePage('demo', 20);
     expect(page.total).toBe(3);
     expect(page.items.slice(0, 2).map((message) => message.id)).toEqual([

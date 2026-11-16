@@ -50,6 +50,10 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
     upstreamHtml = createGiriTrackingHtml(9, 9);
     global.fetch = jest.fn(async () => new Response(upstreamHtml));
     await db.savePlayRecord(username, 'giri', '27100', giriTrackingRecord);
+    // 默认通知全关，本组用例显式开启追更
+    await db.updateUserMessageState(username, {
+      notificationSettings: { mutedKinds: [], now: Date.now() },
+    });
   });
 
   afterEach(async () => {
