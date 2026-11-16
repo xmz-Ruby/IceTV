@@ -1,4 +1,4 @@
-// TMDB 浏览器直连客户端：配置来自用户本地设置（localStorage），不经服务端中转。
+// TMDB 浏览器直连客户端：配置为「用户本地设置 + 站点级 env 默认」的合并结果，不经服务端中转。
 // 官方 api.themoviedb.org 支持跨域（v3 api_key query 是简单请求；v4 Bearer 有预检且放行
 // Authorization 头）。自定义镜像 host 必须自行支持 CORS，网络/CORS 失败统一表现为 network 错误。
 import {
@@ -19,8 +19,9 @@ import type {
 } from '@/features/tmdb/types';
 import {
   type TmdbClientSettings,
+  getTmdbSiteDefaults,
   normalizeTmdbClientSettings,
-  readTmdbSettings,
+  resolveEffectiveTmdbSettings,
 } from '@/lib/tmdb-preferences';
 
 const TMDB_TIMEOUT_MS = 10_000;
@@ -71,9 +72,9 @@ export interface TmdbClientRuntimeSettings {
   bearerAuth: boolean;
 }
 
-// 未启用（开关未开或未填 Key）返回 null，由调用方走 disabled 分支
+// 未启用（生效配置开关未开或没有 Key）返回 null，由调用方走 disabled 分支
 export function resolveTmdbClientSettings(): TmdbClientRuntimeSettings | null {
-  const settings = readTmdbSettings();
+  const settings = resolveEffectiveTmdbSettings();
   if (!settings.enabled || !settings.apiKey) {
     return null;
   }
@@ -94,7 +95,10 @@ function toRuntimeSettings(
 
 // 纯函数：拼请求 URL（language 固定 zh-CN；v3 附 api_key query，v4 不附、鉴权走头）
 export function buildTmdbRequestUrl(
-  settings: Pick<TmdbClientRuntimeSettings, 'apiBase' | 'apiKey' | 'bearerAuth'>,
+  settings: Pick<
+    TmdbClientRuntimeSettings,
+    'apiBase' | 'apiKey' | 'bearerAuth'
+  >,
   path: string,
   params: Record<string, string> = {},
 ): string {
@@ -166,6 +170,7 @@ interface RawSearchResult {
   id?: unknown;
   name?: unknown;
   title?: unknown;
+  media_type?: unknown;
   original_name?: unknown;
   original_title?: unknown;
   first_air_date?: unknown;
@@ -265,6 +270,62 @@ export async function searchTmdb(
     .filter((item): item is TmdbSearchCandidate => item !== null);
 }
 
+export interface TmdbMultiSearchItem extends TmdbSearchCandidate {
+  mediaType: TmdbMediaType;
+}
+
+function toMultiSearchItem(raw: RawSearchResult): TmdbMultiSearchItem | null {
+  // web 无演员页，person 结果直接过滤
+  if (raw.media_type !== 'tv' && raw.media_type !== 'movie') {
+    return null;
+  }
+  const candidate = toSearchCandidate(raw);
+  if (!candidate) return null;
+  return { ...candidate, mediaType: raw.media_type };
+}
+
+// 搜索页整页结果用：/search/multi 一次拿 tv+movie（对齐手机版搜索页）。强制走网络、不进会话缓存。
+export async function searchTmdbMulti(
+  settings: TmdbClientRuntimeSettings,
+  query: string,
+  signal?: AbortSignal,
+): Promise<TmdbMultiSearchItem[]> {
+  const data = await tmdbClientFetchJson<{ results?: unknown }>(
+    settings,
+    '/search/multi',
+    {
+      query,
+      include_adult: 'false',
+      page: '1',
+    },
+    signal,
+  );
+  if (!Array.isArray(data?.results)) {
+    throw new TmdbRequestError('bad-response');
+  }
+  return data.results
+    .map((item) => toMultiSearchItem(item as RawSearchResult))
+    .filter((item): item is TmdbMultiSearchItem => item !== null);
+}
+
+// 对齐手机版 fetchSearchMultiSmart：原词空结果时剥季标记再搜一轮（「XX 第二季」→「XX」）
+export async function searchTmdbMultiSmart(
+  settings: TmdbClientRuntimeSettings,
+  query: string,
+  signal?: AbortSignal,
+): Promise<{ items: TmdbMultiSearchItem[]; strippedQuery: string }> {
+  const items = await searchTmdbMulti(settings, query, signal);
+  if (items.length > 0) {
+    return { items, strippedQuery: '' };
+  }
+  const stripped = stripSeasonMarker(query).trim();
+  if (!stripped || stripped === query) {
+    return { items, strippedQuery: '' };
+  }
+  const retry = await searchTmdbMulti(settings, stripped, signal);
+  return { items: retry, strippedQuery: retry.length > 0 ? stripped : '' };
+}
+
 function toSeasonSummary(raw: RawSearchResult): TmdbSeasonSummary | null {
   const id = toNumber(raw.id);
   const seasonNumber = toNumber(raw.season_number, -1);
@@ -302,7 +363,8 @@ export async function fetchTmdbShowDetail(
   const detail: TmdbShowDetail = {
     id: toNumber(raw.id, id),
     name: typeof raw.name === 'string' ? raw.name : '',
-    original_name: typeof raw.original_name === 'string' ? raw.original_name : '',
+    original_name:
+      typeof raw.original_name === 'string' ? raw.original_name : '',
     overview: typeof raw.overview === 'string' ? raw.overview : '',
     first_air_date: toNullableString(raw.first_air_date),
     poster_path: toNullableString(raw.poster_path),
@@ -312,7 +374,9 @@ export async function fetchTmdbShowDetail(
     genres: Array.isArray(raw.genres)
       ? raw.genres
           .map((genre) =>
-            genre && typeof genre === 'object' && typeof (genre as { name?: unknown }).name === 'string'
+            genre &&
+            typeof genre === 'object' &&
+            typeof (genre as { name?: unknown }).name === 'string'
               ? (genre as { name: string }).name
               : '',
           )
@@ -352,12 +416,14 @@ export async function fetchTmdbSeasonDetail(
           return {
             id: episodeId,
             name: typeof episode.name === 'string' ? episode.name : '',
-            overview: typeof episode.overview === 'string' ? episode.overview : '',
+            overview:
+              typeof episode.overview === 'string' ? episode.overview : '',
             episode_number: episodeNumber,
             season_number: toNumber(episode.season_number, seasonNumber),
             air_date: toNullableString(episode.air_date),
             still_path: toNullableString(episode.still_path),
-            runtime: typeof episode.runtime === 'number' ? episode.runtime : null,
+            runtime:
+              typeof episode.runtime === 'number' ? episode.runtime : null,
             vote_average: toNumber(episode.vote_average),
           };
         })
@@ -404,7 +470,9 @@ export async function fetchTmdbMovieDetail(
     genres: Array.isArray(raw.genres)
       ? raw.genres
           .map((genre) =>
-            genre && typeof genre === 'object' && typeof (genre as { name?: unknown }).name === 'string'
+            genre &&
+            typeof genre === 'object' &&
+            typeof (genre as { name?: unknown }).name === 'string'
               ? (genre as { name: string }).name
               : '',
           )
@@ -495,13 +563,17 @@ export async function resolveBestTmdbMatch(
   return result;
 }
 
-// 设置面板「测试」用：拿面板当前草稿直接打 /configuration，验证地址 + Key 组合
+// 设置面板「测试」用：拿面板当前草稿合并站点默认后打 /configuration，
+// 验证的正是「留空继承默认」时实际会用的地址 + Key 组合
 export async function testTmdbConnection(
-  settings: Pick<TmdbClientSettings, 'enabled' | 'apiHost' | 'apiKey'>,
+  settings: Partial<Pick<TmdbClientSettings, 'apiHost' | 'apiKey'>>,
 ): Promise<void> {
+  const site = getTmdbSiteDefaults();
   const normalized = normalizeTmdbClientSettings({
     ...settings,
     enabled: true,
+    apiHost: settings?.apiHost || site.apiHost,
+    apiKey: settings?.apiKey || site.apiKey,
   });
   if (!normalized.apiKey) {
     throw new TmdbRequestError('bad-key');

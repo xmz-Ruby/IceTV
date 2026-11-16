@@ -3,6 +3,16 @@ import {
   removeStorage,
   writeStorage,
 } from '@/lib/browser-storage';
+import { getRuntimeConfig } from '@/lib/runtime-config';
+import {
+  DEFAULT_TMDB_API_HOST,
+  DEFAULT_TMDB_IMAGE_HOST,
+} from '@/lib/tmdb-defaults';
+
+export {
+  DEFAULT_TMDB_API_HOST,
+  DEFAULT_TMDB_IMAGE_HOST,
+} from '@/lib/tmdb-defaults';
 
 export const TMDB_SETTINGS_STORAGE_KEY = 'tmdbSettings';
 
@@ -13,10 +23,8 @@ export interface TmdbClientSettings {
   imageHost: string;
 }
 
-export const DEFAULT_TMDB_API_HOST = 'https://api.themoviedb.org/3';
-export const DEFAULT_TMDB_IMAGE_HOST = 'https://image.tmdb.org/t/p';
-
-// 默认关闭：未写入本地设置时不改变原有点击直进播放的行为
+// 无站点级 env 时的内置默认：关闭 + 官方地址（DEFAULT_TMDB_SETTINGS 的 host
+// 不再随存储固化，见 normalizeHost —— 空串表示跟随站点默认）
 export const DEFAULT_TMDB_SETTINGS: TmdbClientSettings = {
   enabled: false,
   apiHost: DEFAULT_TMDB_API_HOST,
@@ -24,13 +32,11 @@ export const DEFAULT_TMDB_SETTINGS: TmdbClientSettings = {
   imageHost: DEFAULT_TMDB_IMAGE_HOST,
 };
 
-function normalizeHost(value: string | undefined, fallback: string): string {
+// host 留空或非法 → 空串：语义是「未设置，跟随站点默认」，由 resolveEffectiveTmdbSettings 兜底
+function normalizeHost(value: string | undefined): string {
   const trimmed = (value || '').trim().replace(/\/+$/, '');
-  if (!trimmed) {
-    return fallback;
-  }
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return fallback;
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) {
+    return '';
   }
   return trimmed;
 }
@@ -40,9 +46,39 @@ export function normalizeTmdbClientSettings(
 ): TmdbClientSettings {
   return {
     enabled: settings?.enabled === true,
-    apiHost: normalizeHost(settings?.apiHost, DEFAULT_TMDB_API_HOST),
+    apiHost: normalizeHost(settings?.apiHost),
     apiKey: (settings?.apiKey || '').trim(),
-    imageHost: normalizeHost(settings?.imageHost, DEFAULT_TMDB_IMAGE_HOST),
+    imageHost: normalizeHost(settings?.imageHost),
+  };
+}
+
+// 站点级默认（env 提供，经 RUNTIME_CONFIG 下发）。无配置时回落内置默认（关闭 + 官方地址）。
+export function getTmdbSiteDefaults(): TmdbClientSettings {
+  const runtime = getRuntimeConfig();
+  return {
+    enabled: runtime?.TMDB_DEFAULT_ENABLED ?? DEFAULT_TMDB_SETTINGS.enabled,
+    apiHost: runtime?.TMDB_DEFAULT_API_HOST || DEFAULT_TMDB_API_HOST,
+    apiKey: runtime?.TMDB_DEFAULT_API_KEY || '',
+    imageHost: runtime?.TMDB_DEFAULT_IMAGE_HOST || DEFAULT_TMDB_IMAGE_HOST,
+  };
+}
+
+// 实际生效配置：本地存储逐字段覆盖站点默认。
+// - 未存过本地设置 → 全用站点默认
+// - 存过 → host/Key/图片地址空串继承站点默认；enabled 只认用户显式布尔
+//   （本地 JSON 没有 enabled 字段时也继承站点默认）
+export function resolveEffectiveTmdbSettings(): TmdbClientSettings {
+  const site = getTmdbSiteDefaults();
+  const stored = readStoredSettings();
+  if (!stored) {
+    return site;
+  }
+  const normalized = normalizeTmdbClientSettings(stored);
+  return {
+    enabled: stored.enabled === undefined ? site.enabled : normalized.enabled,
+    apiHost: normalized.apiHost || site.apiHost,
+    apiKey: normalized.apiKey || site.apiKey,
+    imageHost: normalized.imageHost || site.imageHost,
   };
 }
 
@@ -62,11 +98,12 @@ function readStoredSettings(): Partial<TmdbClientSettings> | null {
   }
 }
 
+// 存储侧视图：host 空串 = 跟随站点默认（设置面板编辑用）
 export function readTmdbSettings(): TmdbClientSettings {
   return normalizeTmdbClientSettings(readStoredSettings());
 }
 
-// 存归一化后的值（host 去尾斜杠、非法回落默认、Key 去空白），读侧不再二次判定
+// 存归一化后的值（host 去尾斜杠、非法置空、Key 去空白），读侧不再二次判定
 export function writeTmdbSettings(
   settings: Partial<TmdbClientSettings> | undefined | null,
 ): boolean {
@@ -80,9 +117,9 @@ export function resetTmdbSettings() {
   return removeStorage(TMDB_SETTINGS_STORAGE_KEY);
 }
 
-// 对外可用的判定：开关打开且配置了 Key（host 有默认值，不参与判定）
+// 对外可用的判定：生效配置开关打开且配了 Key（本地或站点默认任一来源）
 export function isTmdbClientEnabled(): boolean {
-  const settings = readTmdbSettings();
+  const settings = resolveEffectiveTmdbSettings();
   return settings.enabled && !!settings.apiKey;
 }
 

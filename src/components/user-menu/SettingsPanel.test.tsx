@@ -168,13 +168,14 @@ it('TMDB 开关展开配置项，填 Key 即写入归一化后的本地设置', 
     '已开启，填写 API Key 后才会生效',
     'info',
   );
+  // 空串 = 跟随站点默认（无站点配置时即官方地址），不再把默认地址固化进存储
   expect(writeStorage).toHaveBeenCalledWith(
     'tmdbSettings',
     JSON.stringify({
       enabled: true,
-      apiHost: 'https://api.themoviedb.org/3',
+      apiHost: '',
       apiKey: '',
-      imageHost: 'https://image.tmdb.org/t/p',
+      imageHost: '',
     }),
   );
 
@@ -185,9 +186,9 @@ it('TMDB 开关展开配置项，填 Key 即写入归一化后的本地设置', 
     'tmdbSettings',
     JSON.stringify({
       enabled: true,
-      apiHost: 'https://api.themoviedb.org/3',
+      apiHost: '',
       apiKey: 'test-key',
-      imageHost: 'https://image.tmdb.org/t/p',
+      imageHost: '',
     }),
   );
 });

@@ -3,6 +3,10 @@ import {
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
 import type { SourceCoverProxyMode } from '@/lib/source-cover-proxy';
+import {
+  DEFAULT_TMDB_API_HOST,
+  DEFAULT_TMDB_IMAGE_HOST,
+} from '@/lib/tmdb-defaults';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 export interface RuntimeConfig {
@@ -32,6 +36,10 @@ export interface RuntimeConfig {
   COVER_IMAGE_CACHE_SIZE: number;
   IMAGE_PROXY_TIMEOUT_SECONDS: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
+  TMDB_DEFAULT_ENABLED: boolean;
+  TMDB_DEFAULT_API_HOST: string;
+  TMDB_DEFAULT_API_KEY: string;
+  TMDB_DEFAULT_IMAGE_HOST: string;
 }
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -62,6 +70,11 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   COVER_IMAGE_CACHE_SIZE: 500,
   IMAGE_PROXY_TIMEOUT_SECONDS: 15,
   SOURCE_COVER_PROXY_MODE: 'auto',
+  // 站点级 TMDB 默认（env 提供，见 tmdb-site-defaults.server.ts）；无 env 时保持关闭 + 官方地址
+  TMDB_DEFAULT_ENABLED: false,
+  TMDB_DEFAULT_API_HOST: DEFAULT_TMDB_API_HOST,
+  TMDB_DEFAULT_API_KEY: '',
+  TMDB_DEFAULT_IMAGE_HOST: DEFAULT_TMDB_IMAGE_HOST,
 };
 
 export function getCustomCategoryLabel(runtimeConfig?: RuntimeConfig): string {
@@ -103,6 +116,10 @@ export type ServerConfigPayload = {
   CoverImageCacheSize?: number;
   ImageProxyTimeoutSeconds?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
+  TmdbDefaultEnabled?: boolean;
+  TmdbDefaultApiHost?: string;
+  TmdbDefaultApiKey?: string;
+  TmdbDefaultImageHost?: string;
 };
 
 declare global {
@@ -195,6 +212,17 @@ function runtimeConfigFromServerConfig(
     SOURCE_COVER_PROXY_MODE:
       data.SourceCoverProxyMode ??
       DEFAULT_RUNTIME_CONFIG.SOURCE_COVER_PROXY_MODE,
+    TMDB_DEFAULT_ENABLED:
+      data.TmdbDefaultEnabled === undefined
+        ? DEFAULT_RUNTIME_CONFIG.TMDB_DEFAULT_ENABLED
+        : data.TmdbDefaultEnabled,
+    TMDB_DEFAULT_API_HOST:
+      data.TmdbDefaultApiHost || DEFAULT_RUNTIME_CONFIG.TMDB_DEFAULT_API_HOST,
+    TMDB_DEFAULT_API_KEY:
+      data.TmdbDefaultApiKey || DEFAULT_RUNTIME_CONFIG.TMDB_DEFAULT_API_KEY,
+    TMDB_DEFAULT_IMAGE_HOST:
+      data.TmdbDefaultImageHost ||
+      DEFAULT_RUNTIME_CONFIG.TMDB_DEFAULT_IMAGE_HOST,
   };
 }
 

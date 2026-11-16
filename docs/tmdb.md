@@ -1,20 +1,23 @@
 # TMDB 元数据与选季集
 
-豆瓣海报类入口（首页精选、豆瓣分类页、目录收藏卡）在用户本地启用 TMDB 时先进 `/subject` 详情页：TMDB 搜索匹配 → 展示剧集详情与季/集网格 → 点集后全源检索并按五层匹配器定位该集 → 跳转播放页。未启用或匹配失败时回退旧的 `/play?title=` 直接搜索起播，详情页永远提供「直接搜索播放」出口。
+豆瓣海报类入口（首页精选、豆瓣分类页、目录收藏卡）与搜索关键词在 TMDB 生效（本地设置或站点 env 默认）时先进 `/subject` 详情页：TMDB 搜索匹配 → 展示剧集详情与季/集网格 → 点集后全源检索并按五层匹配器定位该集 → 跳转播放页。未启用或匹配失败时回退旧的 `/play?title=` 直接搜索起播（搜索页落到源聚合视图），详情页永远提供「直接搜索播放」出口。
 
-## 用户本地设置（无站点级配置）
+## 站点默认与用户本地设置
 
-- TMDB 是**用户级能力**：每个用户在「本地设置 → TMDB」自行开启并填写 API Key，浏览器**直连** TMDB，不经本站服务器。管理后台与环境变量均不配置 TMDB（旧版站点级 `TmdbConfig` 由 `configSelfCheck` 自动从存量配置 JSON 清除）。
-- 设置 helper 在 `src/lib/tmdb-preferences.ts`（localStorage 键 `tmdbSettings`，经 `browser-storage` 访问）：host 去尾斜杠、非 http(s) 回落默认（API `https://api.themoviedb.org/3`，图片 `https://image.tmdb.org/t/p`）；写入口存归一化后的值，默认关闭。
-- `ApiKey` 两种形态：v4 read access token（`eyJ` 开头，走 `Authorization: Bearer`）与 v3 api_key（附 `api_key` query）。**Key 只存在用户自己的浏览器、只发往 TMDB**——这是该设置的设计前提，不是泄露。
+- TMDB 是**浏览器直连**能力：请求由用户浏览器直接发给 TMDB，不经本站服务器，也不消耗回源预算。配置分两层，**本地设置逐字段覆盖站点默认**：
+  - **站点默认**（env，`src/lib/tmdb-site-defaults.server.ts`）：`TMDB_DEFAULT_API_HOST` / `TMDB_DEFAULT_API_KEY` / `TMDB_DEFAULT_IMAGE_HOST`，`TMDB_DEFAULT_ENABLED` 未显式配置时 = 配了 Key 即开。经 `RUNTIME_CONFIG` 与 `/api/server-config` 下发给**所有访问者（含游客）**——这是 browser-direct 设计的固有属性；给不给默认 Key 由站长自行决定。管理后台仍不配置 TMDB（旧版站点级 `TmdbConfig` 由 `configSelfCheck` 自动从存量配置 JSON 清除）。
+  - **用户本地设置**（「本地设置 → TMDB」，`src/lib/tmdb-preferences.ts`，localStorage 键 `tmdbSettings`，经 `browser-storage` 访问）：host 去尾斜杠、非 http(s) 归一化为**空串**；空串的语义是「跟随站点默认」，无站点配置时回落官方地址（API `https://api.themoviedb.org/3`，图片 `https://image.tmdb.org/t/p`）。写入口存归一化后的值。`enabled` 只认用户显式布尔：显式关掉后即使站点默认开也不生效；本地 JSON 无该字段时继承站点默认。
+- 生效配置由 `resolveEffectiveTmdbSettings()` 合并（`isTmdbClientEnabled()` / `resolveTmdbClientSettings()` / `tmdbImageUrl()` 都走它）；设置面板输入框空串即继承、placeholder 呈现站点默认，「测试」按钮对「草稿合并站点默认」的组合发请求。
+- `ApiKey` 两种形态：v4 read access token（`eyJ` 开头，走 `Authorization: Bearer`）与 v3 api_key（附 `api_key` query）。Key 只存在浏览器、只发往 TMDB。
 - 跨域：官方 `api.themoviedb.org` 放行 CORS（v4 Bearer 的预检也放行）；自定义镜像 / 反代必须自行支持 CORS，否则在浏览器里统一表现为「无法连接 TMDB」。
-- 入口判定 `isTmdbSubjectEntryEnabled()`（`src/lib/subject-navigation.ts`）同步读 localStorage：开关打开且填了 Key 才生效，点击时实时判定、改完设置无需刷新。
+- 入口判定 `isTmdbSubjectEntryEnabled()`（`src/lib/subject-navigation.ts`）同步读 localStorage + `window.RUNTIME_CONFIG`：生效配置开关打开且有 Key 才生效，点击时实时判定、改完设置无需刷新。
 
 ## 浏览器直连客户端 `src/features/tmdb/lib/tmdb-client.ts`
 
 - `tmdbClientFetchJson`：plain `fetch` + 10s 超时 + 与外部取消 signal 合并；401/403 → `bad-key`（提示「TMDB API Key 无效」），CORS 拦截与断网都是 TypeError → `network`（文案指路「需支持跨域」）。
 - `resolveBestTmdbMatch`（豆瓣 → TMDB 两轮搜索）与 `fetchTmdbShowDetail` / `fetchTmdbSeasonDetail` / `fetchTmdbMovieDetail` 的打分与响应形状校验与旧服务端版一致；成功结果存模块级会话 `Map`（返回上一页不重打，无 TTL，刷新页面重置）。
-- 图片**直连**图片 host（`tmdbImageUrl()`，`<img>` 加载不受 CORS 限制），host 可在本地设置换镜像。
+- `searchTmdbMulti(Smart)`：搜索页 TMDB 视图用，`/search/multi` 一次拿 tv+movie（person 结果过滤掉，web 无演员页），强制走网络不进会话缓存；原词空结果时剥季标记重搜一轮（对齐手机版 `fetchSearchMultiSmart`）。
+- 图片**直连**图片 host（`tmdbImageUrl()`，`<img>` 加载不受 CORS 限制），host 取生效配置（本地空串继承站点默认）。
 
 ## 匹配链路
 
@@ -27,8 +30,10 @@
 ## 页面与入口
 
 - 页面：`src/app/subject/`（`AuthenticatedRoute` 挂 layout），客户端组件在 `src/features/tmdb/components/`。登录后的页面外壳由 `SubjectPageClient` 与 `SubjectSkeleton` 自带 `PageLayout`（`AuthenticatedRoute` 只在门禁态包外壳），漏了会整页无顶栏、无返回按钮。骨架与真实组件共用 `subject-layout.ts` 布局常量；TMDB 请求全部由浏览器直发（`tmdb-client.ts`），图片直连图片 host（`tmdbImageUrl()`）。
+- `/subject` 两种进入方式：豆瓣海报走标题匹配（`resolveBestTmdbMatch`）；搜索 TMDB 结果带 **`tmdbId` 直进**（跳过匹配按 id 拉详情），关键词季标记解析出的季号经 **`season`** 参数传给初始季推断（`inferInitialSeason` 取标题季标记与 season 参数的较大者）。
 - 源匹配面板（`SourceMatchPanel`）：首个命中源 5s 倒计时自动播放，任意点击/关闭打断。
-- 入口改造集中在 `usePosterPlay` 与 `VideoCard` 的 `playsByTitle` 分支（判定函数 `isTmdbSubjectEntryEnabled()`，读用户本地设置）：启用时跳 `/subject`（本地观看记录的「继续观看」由详情页提供，入口不再短路直跳）；**聚合搜索卡分支不变**，仍直接进播放页。
+- 海报入口集中在 `usePosterPlay` 与 `VideoCard` 的 `playsByTitle` 分支（判定函数 `isTmdbSubjectEntryEnabled()`，读生效配置）：启用时跳 `/subject`（本地观看记录的「继续观看」由详情页提供，入口不再短路直跳）；**聚合搜索卡的源结果分支不变**，仍直接进播放页。
+- **搜索入口**（对齐手机版搜索页）：TMDB 生效时 `/search?q=` 默认渲染 TMDB 结果整页（`TmdbSearchResults`，见[源站与搜索](sources-search.md#搜索)）；空/出错自动落到源聚合，`view=source` 强制源视图。与手机版的有意偏差：**不做豆瓣层**（本站豆瓣体系只有分类浏览、无关键词搜索接口）、**过滤 person 结果**（无演员页）、**不做单结果自动进详情**（web 以 URL 驱动，列表更可预期）。
 
 ## 多画质结论
 

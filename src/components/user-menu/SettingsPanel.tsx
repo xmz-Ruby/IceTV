@@ -60,12 +60,11 @@ import {
 } from '@/lib/local-preference-toggles';
 import {
   type TmdbClientSettings,
-  DEFAULT_TMDB_API_HOST,
-  DEFAULT_TMDB_IMAGE_HOST,
-  DEFAULT_TMDB_SETTINGS,
   getTmdbHostInputError,
+  getTmdbSiteDefaults,
   readTmdbSettings,
   resetTmdbSettings,
+  resolveEffectiveTmdbSettings,
   writeTmdbSettings,
 } from '@/lib/tmdb-preferences';
 import { showToast } from '@/lib/toast';
@@ -115,7 +114,12 @@ function readInitialSettings(): InitialSettings {
       isAuthenticated,
     ),
     doubanImageProxyUrl,
-    tmdbSettings: readTmdbSettings(),
+    // 输入框显示存储值（空串 = 跟随站点默认，以 placeholder 呈现）；
+    // 开关初始选中态取生效配置，让站点 env 默认开启时面板如实显示为开
+    tmdbSettings: {
+      ...readTmdbSettings(),
+      enabled: resolveEffectiveTmdbSettings().enabled,
+    },
   };
 }
 
@@ -331,7 +335,11 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
 
   const handleTmdbEnabledChange = (value: boolean) => {
     updateTmdbSettings({ enabled: value });
-    if (value && !tmdbSettings.apiKey.trim()) {
+    // 站点默认 Key 也算已配置，只有生效配置仍无 Key 时才提醒
+    if (
+      value &&
+      !(tmdbSettings.apiKey.trim() || getTmdbSiteDefaults().apiKey)
+    ) {
       showToast('已开启，填写 API Key 后才会生效', 'info');
     }
   };
@@ -376,7 +384,14 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     setDoubanDataSource(defaultDoubanProxyType);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
-    setTmdbSettings(DEFAULT_TMDB_SETTINGS);
+    // 本地存储已清（resetTmdbSettings），面板回到「未存储」形态：输入框空（placeholder
+    // 呈现站点默认），开关跟随站点默认开关状态
+    setTmdbSettings({
+      enabled: getTmdbSiteDefaults().enabled,
+      apiHost: '',
+      apiKey: '',
+      imageHost: '',
+    });
 
     resetAllLocalPreferenceToggles();
     resetDoubanProxyUrl();
@@ -495,8 +510,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
                   TMDB 详情页
                 </span>
                 <span className='mt-0.5 block text-xs text-gray-400 dark:text-gray-500'>
-                  启用后豆瓣海报点击先进详情页选季选集，浏览器直连 TMDB，需自行填写
-                  API Key；关闭时点击海报直接搜索播放
+                  启用后豆瓣海报与搜索先进详情页选季选集，浏览器直连
+                  TMDB；各项留空跟随站点默认配置，可自行填写 API Key
+                  与镜像地址覆盖；关闭时点击海报直接搜索播放
                 </span>
               </span>
               <span className='relative shrink-0'>
@@ -521,7 +537,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
                 errors={tmdbErrors}
                 isTesting={testingTmdb}
                 onHostChange={handleTmdbHostChange}
-                onApiKeyChange={(value) => updateTmdbSettings({ apiKey: value })}
+                onApiKeyChange={(value) =>
+                  updateTmdbSettings({ apiKey: value })
+                }
                 onTest={handleTestTmdb}
               />
             )}
@@ -718,7 +736,7 @@ function CustomProxyField({
 const TMDB_INPUT_CLASS =
   'h-[42px] min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder-gray-400 shadow-sm transition-colors hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:hover:border-gray-500';
 
-// 默认 host 以 placeholder 呈现：存储里空值/非法值会被归一化回默认，输入框显示空即走默认
+// 站点默认以 placeholder 呈现：存储里的空串表示跟随站点默认，输入框留空即继承
 function TmdbTextInput({
   id,
   label,
@@ -775,13 +793,14 @@ function TmdbSettingsFields({
   onApiKeyChange: (value: string) => void;
   onTest: () => void;
 }) {
+  const site = getTmdbSiteDefaults();
   return (
     <div className='space-y-3 pb-1 pt-3'>
       <TmdbTextInput
         id='local-tmdb-api-host'
         label='TMDB API 地址'
-        placeholder={`默认 ${DEFAULT_TMDB_API_HOST}；可填反代或镜像，需支持跨域`}
-        value={settings.apiHost === DEFAULT_TMDB_API_HOST ? '' : settings.apiHost}
+        placeholder={`默认 ${site.apiHost}；可填反代或镜像，需支持跨域`}
+        value={settings.apiHost}
         error={errors.apiHost}
         onChange={(value) => onHostChange('apiHost', value)}
       />
@@ -794,7 +813,11 @@ function TmdbSettingsFields({
             aria-label='TMDB API Key'
             aria-invalid={errors.apiKey ? true : undefined}
             className={TMDB_INPUT_CLASS}
-            placeholder='API Key：v3 api_key 或 v4 read access token（eyJ 开头）'
+            placeholder={
+              site.apiKey
+                ? '已用站点默认 Key，可留空；填入则覆盖（v3 api_key 或 v4 token）'
+                : 'API Key：v3 api_key 或 v4 read access token（eyJ 开头）'
+            }
             value={settings.apiKey}
             onChange={(event) => onApiKeyChange(event.target.value)}
           />
@@ -809,12 +832,8 @@ function TmdbSettingsFields({
       <TmdbTextInput
         id='local-tmdb-image-host'
         label='TMDB 图片地址'
-        placeholder={`默认 ${DEFAULT_TMDB_IMAGE_HOST}；图片加载不通时可换镜像`}
-        value={
-          settings.imageHost === DEFAULT_TMDB_IMAGE_HOST
-            ? ''
-            : settings.imageHost
-        }
+        placeholder={`默认 ${site.imageHost}；图片加载不通时可换镜像`}
+        value={settings.imageHost}
         error={errors.imageHost}
         onChange={(value) => onHostChange('imageHost', value)}
       />

@@ -9,6 +9,7 @@ import {
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
+import { getTmdbSiteDefaults } from '@/lib/tmdb-site-defaults.server';
 import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
   const doubanImageProxyType = canReadSensitiveConfig
     ? normalizeSiteDoubanImageProxyType(config.SiteConfig.DoubanImageProxyType)
     : publicConfig.DoubanImageProxyType;
+  const tmdbSiteDefaults = getTmdbSiteDefaults();
   const result = {
     SiteName: publicConfig.SiteName,
     SiteIcon: publicConfig.SiteIcon,
@@ -56,6 +58,10 @@ export async function GET(request: NextRequest) {
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,
     ImageProxyTimeoutSeconds: publicConfig.ImageProxyTimeoutSeconds,
     SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
+    TmdbDefaultEnabled: tmdbSiteDefaults.TMDB_DEFAULT_ENABLED,
+    TmdbDefaultApiHost: tmdbSiteDefaults.TMDB_DEFAULT_API_HOST,
+    TmdbDefaultApiKey: tmdbSiteDefaults.TMDB_DEFAULT_API_KEY,
+    TmdbDefaultImageHost: tmdbSiteDefaults.TMDB_DEFAULT_IMAGE_HOST,
   };
   return NextResponse.json(result, {
     headers: {

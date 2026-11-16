@@ -12,6 +12,7 @@ import {
   inferInitialSeason,
   parseSeasonMarker,
   parseTmdbYear,
+  stripSeasonMarker,
 } from '@/features/tmdb/lib/resolve';
 import type { TmdbEpisodeTarget } from '@/features/tmdb/lib/source-episode-match';
 import {
@@ -56,6 +57,9 @@ export function SubjectPageClient() {
   const year = (searchParams.get('year') || '').trim();
   const stype = searchParams.get('stype') === 'movie' ? 'movie' : 'tv';
   const doubanPoster = searchParams.get('poster') || '';
+  // 搜索结果直进：已有 TMDB id 时跳过标题匹配；season 是关键词季标记提示
+  const tmdbIdParam = Number(searchParams.get('tmdbId')) || 0;
+  const seasonHintParam = Number(searchParams.get('season')) || 0;
 
   const [phase, setPhase] = useState<SubjectPhase>('resolving');
   const [fallbackReason, setFallbackReason] = useState('');
@@ -80,11 +84,33 @@ export function SubjectPageClient() {
 
   const seasonCacheRef = useRef(new Map<number, TmdbSeasonDetail>());
 
-  // ① 豆瓣条目 → TMDB 匹配（浏览器直连用户本地设置的 TMDB）
+  // ① 豆瓣条目 → TMDB 匹配（浏览器直连「本地设置 + 站点默认」合并配置）；
+  //    搜索结果直进（tmdbId）时跳过匹配，直接按 id 拉详情
   useEffect(() => {
     if (!title) {
       setPhase('fallback');
       setFallbackReason('缺少标题参数');
+      return;
+    }
+
+    if (tmdbIdParam > 0) {
+      if (!resolveTmdbClientSettings()) {
+        setPhase('fallback');
+        setFallbackReason('未启用 TMDB 详情页，可在 本地设置 → TMDB 中开启');
+        return;
+      }
+      setMatch({
+        mediaType: stype,
+        id: tmdbIdParam,
+        name: title,
+        originalName: title,
+        firstAirDate: year,
+        overview: '',
+        posterPath: null,
+        score: 0,
+      });
+      setStrippedTitle(stripSeasonMarker(title) || title);
+      setPhase('ready');
       return;
     }
 
@@ -117,7 +143,7 @@ export function SubjectPageClient() {
       });
 
     return () => controller.abort();
-  }, [title, stype, year]);
+  }, [title, stype, year, tmdbIdParam]);
 
   // ② tv 拉详情并推断初始季
   useEffect(() => {
@@ -135,7 +161,8 @@ export function SubjectPageClient() {
         if (controller.signal.aborted) return;
         setShowDetail(detail);
         const initial = inferInitialSeason(detail.seasons, {
-          markerSeason: parseSeasonMarker(title),
+          // 标题季标记与 URL season 提示（搜索关键词解析出的季号）取大者
+          markerSeason: Math.max(parseSeasonMarker(title), seasonHintParam),
           doubanYear: year,
         });
         setSelectedSeason(initial > 0 ? initial : 1);
@@ -148,7 +175,7 @@ export function SubjectPageClient() {
       });
 
     return () => controller.abort();
-  }, [phase, match, title, year]);
+  }, [phase, match, title, year, seasonHintParam]);
 
   // ③ movie 拉详情
   useEffect(() => {

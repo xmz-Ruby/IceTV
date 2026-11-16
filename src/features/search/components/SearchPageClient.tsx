@@ -2,7 +2,7 @@
 
 import { AlertCircle, SearchX } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
@@ -16,6 +16,7 @@ import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/na
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { SearchResultsLoading } from '@/features/search/components/SearchPageSkeleton';
+import { TmdbSearchResults } from '@/features/search/components/TmdbSearchResults';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
   FilterState,
@@ -38,7 +39,11 @@ import {
   SEARCH_RESULTS_CONTAINER_CLASS,
 } from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import { useClientHydrated } from '@/hooks/useClientHydrated';
+import { addSearchHistory } from '@/lib/db.client';
 import type { SearchFailedSource } from '@/lib/search-failed-sources';
+import { isTmdbClientEnabled } from '@/lib/tmdb-preferences';
+import { showToast } from '@/lib/toast';
 
 const DEFAULT_FILTER_STATE: FilterState = {
   source: 'all',
@@ -146,6 +151,26 @@ function AuthenticatedSearchPageClient() {
 
   const [viewMode, setViewMode] = useSearchViewMode(activeSearchQuery);
 
+  // TMDB 视图判定放 hydration 之后：SSR 首帧按源视图渲染，避免 localStorage/
+  // RUNTIME_CONFIG 读取差异导致的 hydration 不匹配，挂载完成后翻转
+  const clientHydrated = useClientHydrated();
+  const tmdbEnabled = clientHydrated && isTmdbClientEnabled();
+  // 对齐手机版搜索逻辑：TMDB 启用时关键词先进 TMDB 结果整页，view=source 强制源聚合
+  const sourceView =
+    !tmdbEnabled || !activeSearchQuery || searchParams.get('view') === 'source';
+
+  const switchToSourceView = useCallback(
+    (notice?: string) => {
+      router.replace(
+        `/search?q=${encodeURIComponent(activeSearchQuery)}&view=source`,
+      );
+      if (notice) {
+        showToast(notice, 'info', { key: 'tmdb-search-fallback' });
+      }
+    },
+    [router, activeSearchQuery],
+  );
+
   const {
     error,
     retry,
@@ -165,6 +190,7 @@ function AuthenticatedSearchPageClient() {
     viewMode,
     filterAggYearOrder: filterAgg.yearOrder,
     filterAllYearOrder: filterAll.yearOrder,
+    enabled: sourceView,
   });
 
   const { filterOptions, filteredAllResults, filteredAggResults, getGroupRef } =
@@ -193,6 +219,14 @@ function AuthenticatedSearchPageClient() {
     setFilterAll(createDefaultFilterState());
     setFilterAgg(createDefaultFilterState());
   }, [activeSearchQuery]);
+
+  // TMDB 视图下源搜索不执行（useSearchExecution 关着），历史在这里照记（对齐手机版提交即记）
+  useEffect(() => {
+    if (!activeSearchQuery || sourceView) {
+      return;
+    }
+    addSearchHistory(activeSearchQuery);
+  }, [activeSearchQuery, sourceView]);
 
   const searchSettled = !isLoading && !error;
   const allSourcesFailed =
@@ -261,7 +295,7 @@ function AuthenticatedSearchPageClient() {
             </button>
           )}
         </div>
-        {showResults && (
+        {sourceView && showResults && (
           <div className={SEARCH_MOBILE_FILTER_ROW_CLASS}>
             <MobileSearchFilterControls
               resultCount={isLoading && resultCount === 0 ? null : resultCount}
@@ -275,10 +309,15 @@ function AuthenticatedSearchPageClient() {
         )}
       </div>
 
-      {showResults && error && (
+      {sourceView && showResults && error && (
         <LoadErrorState message={error} onRetry={retry} />
       )}
-      {showResults ? (
+      {!sourceView ? (
+        <TmdbSearchResults
+          query={activeSearchQuery}
+          onFallbackToSource={switchToSourceView}
+        />
+      ) : showResults ? (
         <>
           <div data-nav-subbar className={SEARCH_DESKTOP_BAR_CLASS}>
             <div className={SEARCH_DESKTOP_BAR_ROW_CLASS}>

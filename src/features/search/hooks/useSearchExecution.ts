@@ -28,6 +28,8 @@ interface UseSearchExecutionParams {
   viewMode: 'agg' | 'all';
   filterAggYearOrder: 'none' | 'asc' | 'desc';
   filterAllYearOrder: 'none' | 'asc' | 'desc';
+  // false 表示当前展示 TMDB 结果视图，源聚合搜索不起流（切回源视图时依赖变化自动开跑）
+  enabled?: boolean;
 }
 
 type SearchOrdering = Pick<
@@ -63,6 +65,7 @@ export function useSearchExecution({
   viewMode,
   filterAggYearOrder,
   filterAllYearOrder,
+  enabled = true,
 }: UseSearchExecutionParams) {
   const query = normalizeSearchQueryInput(searchParams.get('q') || '');
   const clientHydrated = useClientHydrated();
@@ -122,6 +125,9 @@ export function useSearchExecution({
 
   // 连接随 effect 清理关闭；StrictMode 重跑时会重新建立，不能按 query 去重跳过
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     let active = true;
     const controller = new AbortController();
     setError(null);
@@ -338,7 +344,7 @@ export function useSearchExecution({
       }
       pendingResultsRef.current = [];
     };
-  }, [query, retryCount]);
+  }, [query, retryCount, enabled]);
 
   useEffect(() => {
     const query = currentQueryRef.current;

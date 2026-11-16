@@ -39,12 +39,13 @@ function createSnapshot(title: string): SearchSnapshot {
   };
 }
 
-function useExecution(query: string) {
+function useExecution(query: string, enabled?: boolean) {
   return useSearchExecution({
     searchParams: new URLSearchParams({ q: query }) as ReadonlyURLSearchParams,
     viewMode: 'agg',
     filterAggYearOrder: 'none',
     filterAllYearOrder: 'none',
+    ...(enabled === undefined ? {} : { enabled }),
   });
 }
 
@@ -75,6 +76,19 @@ describe('useSearchExecution cached navigation', () => {
       isLoading: true,
       searchResults: [],
     });
+  });
+
+  it('enabled=false（TMDB 视图）不起源搜索流，翻回 true 后开跑', () => {
+    let enabled = false;
+    const { rerender } = renderHook(() => useExecution('gated', enabled));
+    expect(createEventSource).not.toHaveBeenCalled();
+
+    enabled = true;
+    rerender();
+    expect(createEventSource).toHaveBeenCalledTimes(1);
+    expect(createEventSource).toHaveBeenCalledWith(
+      `/api/search/ws?q=${encodeURIComponent('gated')}`,
+    );
   });
 
   it('restores cached results during the first client render without searching again', () => {

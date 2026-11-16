@@ -25,6 +25,7 @@ import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
 import { getStorageType } from '@/lib/storage-type';
 import { buildThemeInitScript, DEFAULT_THEME } from '@/lib/theme-preference';
+import { getTmdbSiteDefaults } from '@/lib/tmdb-site-defaults.server';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 const inter = Inter({
@@ -112,6 +113,7 @@ export default async function RootLayout({
     COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
     IMAGE_PROXY_TIMEOUT_SECONDS: publicConfig.ImageProxyTimeoutSeconds,
     SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,
+    ...getTmdbSiteDefaults(),
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
   const runtimeConfigReadyForGuest = initialAuthSession.status === 'guest';
