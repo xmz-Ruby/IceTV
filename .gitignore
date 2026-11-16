@@ -60,3 +60,5 @@ public/sw.js.map
 src/lib/__tests__/__fixtures__/*
 # 共享测试数据需入库
 !src/lib/__tests__/__fixtures__/*.ts
+*__pycache__*
+.zcode
