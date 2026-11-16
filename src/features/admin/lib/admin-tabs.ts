@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   FileText,
-  Film,
   FolderOpen,
   Gauge,
   Megaphone,
@@ -19,7 +18,6 @@ export type AdminTabId =
   | 'site'
   | 'announcements'
   | 'runtime'
-  | 'tmdb'
   | 'user'
   | 'reviews'
   | 'danmaku'
@@ -71,13 +69,6 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     id: 'runtime',
     label: '运行参数',
     icon: SlidersHorizontal,
-    group: 'site',
-    ownerOnly: false,
-  },
-  {
-    id: 'tmdb',
-    label: 'TMDB',
-    icon: Film,
     group: 'site',
     ownerOnly: false,
   },

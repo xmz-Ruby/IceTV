@@ -155,3 +155,47 @@ it('本地设置写入失败只提示错误并保留面板', () => {
   );
   expect(showToast).not.toHaveBeenCalledWith('刷新页面后生效', 'info');
 });
+
+it('TMDB 开关展开配置项，填 Key 即写入归一化后的本地设置', () => {
+  render(<SettingsPanel onClose={jest.fn()} />);
+  const toggle = screen.getByRole('checkbox', { name: /TMDB 详情页/ });
+  expect((toggle as HTMLInputElement).checked).toBe(false);
+  expect(screen.queryByLabelText('TMDB API Key')).not.toBeInTheDocument();
+
+  fireEvent.click(toggle);
+  expect((toggle as HTMLInputElement).checked).toBe(true);
+  expect(showToast).toHaveBeenCalledWith(
+    '已开启，填写 API Key 后才会生效',
+    'info',
+  );
+  expect(writeStorage).toHaveBeenCalledWith(
+    'tmdbSettings',
+    JSON.stringify({
+      enabled: true,
+      apiHost: 'https://api.themoviedb.org/3',
+      apiKey: '',
+      imageHost: 'https://image.tmdb.org/t/p',
+    }),
+  );
+
+  fireEvent.change(screen.getByLabelText('TMDB API Key'), {
+    target: { value: ' test-key ' },
+  });
+  expect(writeStorage).toHaveBeenLastCalledWith(
+    'tmdbSettings',
+    JSON.stringify({
+      enabled: true,
+      apiHost: 'https://api.themoviedb.org/3',
+      apiKey: 'test-key',
+      imageHost: 'https://image.tmdb.org/t/p',
+    }),
+  );
+});
+
+it('恢复默认同时清除 TMDB 本地设置', () => {
+  render(<SettingsPanel onClose={jest.fn()} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: /TMDB 详情页/ }));
+  fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+  fireEvent.click(screen.getByRole('button', { name: '确认恢复' }));
+  expect(removeStorage).toHaveBeenCalledWith('tmdbSettings');
+});

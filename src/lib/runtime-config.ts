@@ -22,7 +22,6 @@ export interface RuntimeConfig {
   AUTO_SWITCH_SOURCE: boolean;
   ENABLE_DANMAKU: boolean;
   ENABLE_USER_DANMAKU: boolean;
-  TMDB_ENABLED: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
@@ -53,7 +52,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   AUTO_SWITCH_SOURCE: false,
   ENABLE_DANMAKU: false,
   ENABLE_USER_DANMAKU: false,
-  TMDB_ENABLED: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
@@ -95,7 +93,6 @@ export type ServerConfigPayload = {
   AutoSwitchSource?: boolean;
   EnableDanmaku?: boolean;
   EnableUserDanmaku?: boolean;
-  TmdbEnabled?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
@@ -170,10 +167,6 @@ function runtimeConfigFromServerConfig(
       data.EnableUserDanmaku === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_USER_DANMAKU
         : data.EnableUserDanmaku,
-    TMDB_ENABLED:
-      data.TmdbEnabled === undefined
-        ? DEFAULT_RUNTIME_CONFIG.TMDB_ENABLED
-        : data.TmdbEnabled,
     CUSTOM_CATEGORIES:
       data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
     FLUID_SEARCH:

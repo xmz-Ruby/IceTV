@@ -8,7 +8,7 @@
 - 缓存 TTL 默认 60 秒，可由 `CONFIG_CACHE_TTL_MS` 覆盖；写路径一律先 `invalidateConfigCache()`，不依赖 TTL 长短。
 - 订阅地址、自动更新、检查时间与原文的真相源是 `config_subscription`。`failure_since` 记录当前这段定时更新失败的起点：持续失败时保留，定时或手动拉取成功、更换订阅地址时清空，与配置和订阅快照一起走 CAS 写入；配置冲突不算订阅失败。MySQL 的加列迁移须在业务迁移事务之前执行，DDL 会隐式提交事务。直播频道数的真相源是 `live_source_state`。运行时配置 JSON 不保存这些字段，后台响应按需组装。
 - 订阅更新与源配置修改经同一配置 CAS 事务提交，并复核订阅快照；直播刷新仅更新状态表，按当前源地址复核，删除源同事务清理状态。
-- `TmdbConfig`（TMDB 开关/host/ApiKey/图片 host）存于运行时配置 JSON，归一化入口 `src/lib/tmdb-settings.ts`；ApiKey 只留在服务端，公开面仅 `TmdbEnabled` 布尔（详见 [TMDB](tmdb.md)）。
+- 旧版站点级 `TmdbConfig` 已移除（TMDB 改为用户浏览器本地设置、浏览器直连，详见 [TMDB](tmdb.md)）；`configSelfCheck()` 会把存量配置 JSON 里的该孤儿键删掉，借加载期变更检测一次性落库，无需迁移脚本。
 
 ## 用户权限
 

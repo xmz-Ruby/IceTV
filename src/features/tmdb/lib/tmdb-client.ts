@@ -1,23 +1,31 @@
-import 'server-only';
-
+// TMDB 浏览器直连客户端：配置来自用户本地设置（localStorage），不经服务端中转。
+// 官方 api.themoviedb.org 支持跨域（v3 api_key query 是简单请求；v4 Bearer 有预检且放行
+// Authorization 头）。自定义镜像 host 必须自行支持 CORS，网络/CORS 失败统一表现为 network 错误。
 import {
-  type TmdbMovieDetail,
-  type TmdbSearchCandidate,
-  type TmdbSeasonDetail,
-  type TmdbSeasonSummary,
-  type TmdbShowDetail,
+  buildResolveQueries,
+  isTmdbMatchScore,
+  scoreTmdbCandidate,
+  stripSeasonMarker,
+} from '@/features/tmdb/lib/resolve';
+import type {
+  TmdbMediaType,
+  TmdbMovieDetail,
+  TmdbResolveMatch,
+  TmdbResolveResponse,
+  TmdbSearchCandidate,
+  TmdbSeasonDetail,
+  TmdbSeasonSummary,
+  TmdbShowDetail,
 } from '@/features/tmdb/types';
-import { getConfigForRead } from '@/lib/config';
 import {
-  readJsonLimited,
-  UPSTREAM_METADATA_MAX_BYTES,
-} from '@/lib/proxy-response-limits';
-import { fetchUpstream } from '@/lib/upstream-fetch.server';
+  type TmdbClientSettings,
+  normalizeTmdbClientSettings,
+  readTmdbSettings,
+} from '@/lib/tmdb-preferences';
 
 const TMDB_TIMEOUT_MS = 10_000;
 
 export type TmdbRequestErrorCode =
-  | 'disabled'
   | 'network'
   | 'timeout'
   | 'bad-key'
@@ -34,37 +42,62 @@ export class TmdbRequestError extends Error {
   }
 }
 
-export interface TmdbRuntimeSettings {
-  enabled: boolean;
+export function describeTmdbClientError(
+  error: unknown,
+  fallback = 'TMDB 请求失败',
+): string {
+  if (error instanceof TmdbRequestError) {
+    switch (error.code) {
+      case 'bad-key':
+        return 'TMDB API Key 无效';
+      case 'timeout':
+        return 'TMDB 请求超时';
+      case 'network':
+        // CORS 拦截与断网在 fetch 层都是 TypeError，这里统一给能指路的文案
+        return '无法连接 TMDB：请检查网络或 API 地址（自定义地址需支持跨域访问）';
+      case 'bad-response':
+        return 'TMDB 返回了无法解析的内容';
+      default:
+        return 'TMDB 请求失败';
+    }
+  }
+  return fallback;
+}
+
+export interface TmdbClientRuntimeSettings {
   apiBase: string;
   imageBase: string;
   apiKey: string;
   bearerAuth: boolean;
 }
 
-export async function resolveTmdbRuntimeSettings(): Promise<TmdbRuntimeSettings> {
-  const config = await getConfigForRead();
-  const settings = config.TmdbConfig;
-  const apiKey = (settings?.ApiKey || '').trim();
+// 未启用（开关未开或未填 Key）返回 null，由调用方走 disabled 分支
+export function resolveTmdbClientSettings(): TmdbClientRuntimeSettings | null {
+  const settings = readTmdbSettings();
+  if (!settings.enabled || !settings.apiKey) {
+    return null;
+  }
+  return toRuntimeSettings(settings);
+}
+
+function toRuntimeSettings(
+  settings: TmdbClientSettings,
+): TmdbClientRuntimeSettings {
   return {
-    enabled: settings?.Enabled === true && !!apiKey,
-    apiBase: settings?.ApiHost || 'https://api.themoviedb.org/3',
-    imageBase: settings?.ImageHost || 'https://image.tmdb.org/t/p',
-    apiKey,
+    apiBase: settings.apiHost,
+    imageBase: settings.imageHost,
+    apiKey: settings.apiKey,
     // eyJ 开头是 v4 read access token，走 Authorization 头；否则按 v3 api_key 附在 query
-    bearerAuth: apiKey.startsWith('eyJ'),
+    bearerAuth: settings.apiKey.startsWith('eyJ'),
   };
 }
 
-export async function tmdbFetchJson<T>(
-  settings: TmdbRuntimeSettings,
+// 纯函数：拼请求 URL（language 固定 zh-CN；v3 附 api_key query，v4 不附、鉴权走头）
+export function buildTmdbRequestUrl(
+  settings: Pick<TmdbClientRuntimeSettings, 'apiBase' | 'apiKey' | 'bearerAuth'>,
   path: string,
   params: Record<string, string> = {},
-): Promise<T> {
-  if (!settings.enabled) {
-    throw new TmdbRequestError('disabled');
-  }
-
+): string {
   const url = new URL(`${settings.apiBase}${path}`);
   url.searchParams.set('language', 'zh-CN');
   for (const [key, value] of Object.entries(params)) {
@@ -73,12 +106,23 @@ export async function tmdbFetchJson<T>(
   if (!settings.bearerAuth) {
     url.searchParams.set('api_key', settings.apiKey);
   }
+  return url.toString();
+}
 
+async function tmdbClientFetchJson<T>(
+  settings: TmdbClientRuntimeSettings,
+  path: string,
+  params: Record<string, string> = {},
+  signal?: AbortSignal,
+): Promise<T> {
+  // 手动合并外部取消（组件卸载）与超时；不用 AbortSignal.any 以兼容更早的浏览器
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TMDB_TIMEOUT_MS);
+  const onExternalAbort = () => controller.abort();
+  signal?.addEventListener('abort', onExternalAbort);
   let response: Response;
   try {
-    response = await fetchUpstream(url.toString(), {
+    response = await fetch(buildTmdbRequestUrl(settings, path, params), {
       signal: controller.signal,
       headers: {
         accept: 'application/json',
@@ -88,12 +132,16 @@ export async function tmdbFetchJson<T>(
       },
     });
   } catch {
+    if (signal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }
     if (controller.signal.aborted) {
       throw new TmdbRequestError('timeout');
     }
     throw new TmdbRequestError('network');
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onExternalAbort);
   }
 
   if (!response.ok) {
@@ -108,7 +156,7 @@ export async function tmdbFetchJson<T>(
   }
 
   try {
-    return await readJsonLimited<T>(response, UPSTREAM_METADATA_MAX_BYTES);
+    return (await response.json()) as T;
   } catch {
     throw new TmdbRequestError('bad-response');
   }
@@ -174,12 +222,32 @@ function toSearchCandidate(raw: RawSearchResult): TmdbSearchCandidate | null {
   };
 }
 
+// 会话级缓存（模块 Map，页面生命周期）：返回上一页/重开详情页时不再重复打 TMDB。
+// 只缓存成功结果；无 TTL，数据变化靠刷新页面。
+const SESSION_CACHE_MAX = 128;
+const sessionCache = new Map<string, unknown>();
+
+function readSessionCache<T>(key: string): T | undefined {
+  return sessionCache.get(key) as T | undefined;
+}
+
+function writeSessionCache(key: string, value: unknown) {
+  if (sessionCache.size >= SESSION_CACHE_MAX) {
+    const oldest = sessionCache.keys().next().value;
+    if (oldest !== undefined) {
+      sessionCache.delete(oldest);
+    }
+  }
+  sessionCache.set(key, value);
+}
+
 export async function searchTmdb(
-  settings: TmdbRuntimeSettings,
+  settings: TmdbClientRuntimeSettings,
   mediaType: 'tv' | 'movie',
   query: string,
+  signal?: AbortSignal,
 ): Promise<TmdbSearchCandidate[]> {
-  const data = await tmdbFetchJson<{ results?: unknown }>(
+  const data = await tmdbClientFetchJson<{ results?: unknown }>(
     settings,
     '/search/' + mediaType,
     {
@@ -187,6 +255,7 @@ export async function searchTmdb(
       include_adult: 'false',
       page: '1',
     },
+    signal,
   );
   if (!Array.isArray(data?.results)) {
     throw new TmdbRequestError('bad-response');
@@ -212,16 +281,25 @@ function toSeasonSummary(raw: RawSearchResult): TmdbSeasonSummary | null {
 }
 
 export async function fetchTmdbShowDetail(
-  settings: TmdbRuntimeSettings,
+  settings: TmdbClientRuntimeSettings,
   id: number,
+  signal?: AbortSignal,
 ): Promise<TmdbShowDetail> {
-  const raw = await tmdbFetchJson<Record<string, unknown>>(settings, `/tv/${id}`);
+  const cacheKey = `tv:${id}`;
+  const cached = readSessionCache<TmdbShowDetail>(cacheKey);
+  if (cached) return cached;
+  const raw = await tmdbClientFetchJson<Record<string, unknown>>(
+    settings,
+    `/tv/${id}`,
+    {},
+    signal,
+  );
   const seasons = Array.isArray(raw.seasons)
     ? raw.seasons
         .map((item) => toSeasonSummary(item as RawSearchResult))
         .filter((item): item is TmdbSeasonSummary => item !== null)
     : [];
-  return {
+  const detail: TmdbShowDetail = {
     id: toNumber(raw.id, id),
     name: typeof raw.name === 'string' ? raw.name : '',
     original_name: typeof raw.original_name === 'string' ? raw.original_name : '',
@@ -245,16 +323,24 @@ export async function fetchTmdbShowDetail(
     number_of_episodes: toNumber(raw.number_of_episodes),
     seasons,
   };
+  writeSessionCache(cacheKey, detail);
+  return detail;
 }
 
 export async function fetchTmdbSeasonDetail(
-  settings: TmdbRuntimeSettings,
+  settings: TmdbClientRuntimeSettings,
   showId: number,
   seasonNumber: number,
+  signal?: AbortSignal,
 ): Promise<TmdbSeasonDetail> {
-  const raw = await tmdbFetchJson<Record<string, unknown>>(
+  const cacheKey = `season:${showId}:${seasonNumber}`;
+  const cached = readSessionCache<TmdbSeasonDetail>(cacheKey);
+  if (cached) return cached;
+  const raw = await tmdbClientFetchJson<Record<string, unknown>>(
     settings,
     `/tv/${showId}/season/${seasonNumber}`,
+    {},
+    signal,
   );
   const episodes = Array.isArray(raw.episodes)
     ? raw.episodes
@@ -279,21 +365,32 @@ export async function fetchTmdbSeasonDetail(
           (item): item is TmdbSeasonDetail['episodes'][number] => item !== null,
         )
     : [];
-  return {
+  const detail: TmdbSeasonDetail = {
     showId,
     seasonNumber,
     name: typeof raw.name === 'string' ? raw.name : '',
     airDate: toNullableString(raw.air_date),
     episodes,
   };
+  writeSessionCache(cacheKey, detail);
+  return detail;
 }
 
 export async function fetchTmdbMovieDetail(
-  settings: TmdbRuntimeSettings,
+  settings: TmdbClientRuntimeSettings,
   id: number,
+  signal?: AbortSignal,
 ): Promise<TmdbMovieDetail> {
-  const raw = await tmdbFetchJson<Record<string, unknown>>(settings, `/movie/${id}`);
-  return {
+  const cacheKey = `movie:${id}`;
+  const cached = readSessionCache<TmdbMovieDetail>(cacheKey);
+  if (cached) return cached;
+  const raw = await tmdbClientFetchJson<Record<string, unknown>>(
+    settings,
+    `/movie/${id}`,
+    {},
+    signal,
+  );
+  const detail: TmdbMovieDetail = {
     id: toNumber(raw.id, id),
     title: typeof raw.title === 'string' ? raw.title : '',
     original_title:
@@ -315,4 +412,99 @@ export async function fetchTmdbMovieDetail(
       : [],
     runtime: typeof raw.runtime === 'number' ? raw.runtime : null,
   };
+  writeSessionCache(cacheKey, detail);
+  return detail;
+}
+
+// 豆瓣条目 → TMDB 最佳匹配：两轮搜索（先按传入类型，不过线再用另一类型兜底——
+// 同名电影/剧集录错型），打分与阈值逻辑与服务端版一致（resolve.ts 纯函数）。
+async function resolveBestMatchUncached(
+  settings: TmdbClientRuntimeSettings,
+  title: string,
+  year: string,
+  preferredType: TmdbMediaType,
+  signal?: AbortSignal,
+): Promise<TmdbResolveResponse> {
+  const isTv = preferredType !== 'movie';
+  const stripped = isTv ? stripSeasonMarker(title) : title;
+  const queries = buildResolveQueries(title, stripped);
+
+  let best: { match: TmdbResolveMatch; asTv: boolean } | null = null;
+  for (let round = 0; round < 2 && !best; round += 1) {
+    const asTv = round === 0 ? isTv : !isTv;
+    const mediaType: TmdbMediaType = asTv ? 'tv' : 'movie';
+    for (const query of queries) {
+      const candidates = await searchTmdb(settings, mediaType, query, signal);
+      for (const candidate of candidates) {
+        const score = scoreTmdbCandidate(candidate, {
+          title,
+          cleanedTitle: stripped,
+          year,
+        });
+        if (!isTmdbMatchScore(score)) continue;
+        if (!best || score > best.match.score) {
+          best = {
+            asTv,
+            match: {
+              mediaType,
+              id: candidate.id,
+              name: candidate.name,
+              originalName: candidate.original_name,
+              firstAirDate: candidate.first_air_date || '',
+              overview: candidate.overview,
+              posterPath: candidate.poster_path,
+              score,
+            },
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    status: best ? 'ok' : 'no-match',
+    match: best?.match ?? null,
+    strippedTitle: stripped,
+  };
+}
+
+// 未启用返回 disabled；网络/Key 错误抛 TmdbRequestError，调用方用 describeTmdbClientError 转文案
+export async function resolveBestTmdbMatch(
+  title: string,
+  year: string,
+  preferredType: TmdbMediaType,
+  signal?: AbortSignal,
+): Promise<TmdbResolveResponse> {
+  const settings = resolveTmdbClientSettings();
+  if (!settings) {
+    return { status: 'disabled', match: null, strippedTitle: '' };
+  }
+  const cacheKey = `resolve:${preferredType}:${title}:${year}`;
+  const cached = readSessionCache<TmdbResolveResponse>(cacheKey);
+  if (cached) return cached;
+  const result = await resolveBestMatchUncached(
+    settings,
+    title,
+    year,
+    preferredType,
+    signal,
+  );
+  if (result.status === 'ok' || result.status === 'no-match') {
+    writeSessionCache(cacheKey, result);
+  }
+  return result;
+}
+
+// 设置面板「测试」用：拿面板当前草稿直接打 /configuration，验证地址 + Key 组合
+export async function testTmdbConnection(
+  settings: Pick<TmdbClientSettings, 'enabled' | 'apiHost' | 'apiKey'>,
+): Promise<void> {
+  const normalized = normalizeTmdbClientSettings({
+    ...settings,
+    enabled: true,
+  });
+  if (!normalized.apiKey) {
+    throw new TmdbRequestError('bad-key');
+  }
+  await tmdbClientFetchJson(toRuntimeSettings(normalized), '/configuration');
 }

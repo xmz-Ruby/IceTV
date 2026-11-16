@@ -1,9 +1,9 @@
-import { getRuntimeConfig } from '@/lib/runtime-config';
+import { isTmdbClientEnabled } from '@/lib/tmdb-preferences';
 
-// TMDB 详情页入口：站点开启 TMDB 且配置了 Key 时，豆瓣海报类点击先进 /subject 选季选集。
-// 判断只读内联注入的 window.RUNTIME_CONFIG，未就绪（undefined）按未开启回退旧链路。
+// TMDB 详情页入口：用户在本地设置中开启 TMDB 且填了 Key 时，豆瓣海报类点击先进 /subject 选季选集。
+// 判定同步读 localStorage，点击时实时生效；未启用回退旧的直接搜索播放链路。
 export function isTmdbSubjectEntryEnabled(): boolean {
-  return getRuntimeConfig()?.TMDB_ENABLED === true;
+  return isTmdbClientEnabled();
 }
 
 export function buildSubjectPageUrl({

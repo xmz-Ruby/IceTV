@@ -400,24 +400,6 @@ export default function AdminContentSkeleton({
         </div>
       );
       break;
-    case 'tmdb':
-      content = (
-        <div className='space-y-6'>
-          <AdminSettingsGroup title='TMDB 元数据'>
-            <Field label='启用 TMDB' inline />
-            <AdminSettingRow label='API 地址'>
-              <Block className='h-9 w-full rounded-lg sm:w-96' />
-            </AdminSettingRow>
-            <AdminSettingRow label='API Key'>
-              <Block className='h-9 w-full rounded-lg sm:w-96' />
-            </AdminSettingRow>
-            <AdminSettingRow label='图片地址'>
-              <Block className='h-9 w-full rounded-lg sm:w-96' />
-            </AdminSettingRow>
-          </AdminSettingsGroup>
-        </div>
-      );
-      break;
     case 'announcements':
       content = (
         <div className='space-y-8'>

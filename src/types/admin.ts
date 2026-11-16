@@ -108,7 +108,6 @@ export interface AdminConfig {
     disabled?: boolean;
   }[];
   TrafficConfig?: TrafficSettings;
-  TmdbConfig?: TmdbSettings;
 }
 
 export interface AdminConfigResult {
@@ -121,12 +120,4 @@ export type LinuxDoTrustLevel = 0 | 1 | 2 | 3 | 4;
 export interface LinuxDoLoginSettings {
   Enabled: boolean;
   MinTrustLevel: LinuxDoTrustLevel;
-}
-
-export interface TmdbSettings {
-  Enabled: boolean;
-  ApiHost: string;
-  // v3 api_key 或 v4 read access token（eyJ 开头自动按 Bearer 使用）
-  ApiKey: string;
-  ImageHost: string;
 }

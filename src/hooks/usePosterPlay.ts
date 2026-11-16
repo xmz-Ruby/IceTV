@@ -71,7 +71,7 @@ export function usePosterPlay({
   }, [title, year]);
 
   const play = useCallback(() => {
-    // TMDB 开启时先进详情页选季选集（本地观看记录的「继续观看」由详情页提供），
+    // 用户在本地设置启用 TMDB 时先进详情页选季选集（「继续观看」由详情页提供），
     // 弹幕/搜索预热留给旧链路——详情页的源匹配面板会用自己的检索词
     if (isTmdbSubjectEntryEnabled()) {
       router.push(

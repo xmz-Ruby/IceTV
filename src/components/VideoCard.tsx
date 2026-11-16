@@ -434,7 +434,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         )}&id=${actualId.replace('live_', '')}`;
       }
       if (playsByTitle) {
-        // TMDB 开启时豆瓣/目录收藏卡片先进详情页选季选集（「继续观看」由详情页提供）
+        // 用户在本地设置启用 TMDB 时豆瓣/目录收藏卡片先进详情页选季选集（「继续观看」由详情页提供）
         if (isTmdbSubjectEntryEnabled()) {
           return buildSubjectPageUrl({
             title: actualTitle,

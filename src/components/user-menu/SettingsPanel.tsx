@@ -11,6 +11,10 @@ import {
 } from '@/components/modals/modal-styles';
 import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
+import {
+  describeTmdbClientError,
+  testTmdbConnection,
+} from '@/features/tmdb/lib/tmdb-client';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { CustomProxyTestKind } from '@/lib/custom-proxy-test';
 import {
@@ -54,6 +58,16 @@ import {
   readLocalPreferenceToggleState,
   resetAllLocalPreferenceToggles,
 } from '@/lib/local-preference-toggles';
+import {
+  type TmdbClientSettings,
+  DEFAULT_TMDB_API_HOST,
+  DEFAULT_TMDB_IMAGE_HOST,
+  DEFAULT_TMDB_SETTINGS,
+  getTmdbHostInputError,
+  readTmdbSettings,
+  resetTmdbSettings,
+  writeTmdbSettings,
+} from '@/lib/tmdb-preferences';
 import { showToast } from '@/lib/toast';
 import { getErrorMessage } from '@/lib/user-facing-error';
 
@@ -72,6 +86,13 @@ interface InitialSettings {
   doubanProxyUrl: string;
   doubanImageProxyType: string;
   doubanImageProxyUrl: string;
+  tmdbSettings: TmdbClientSettings;
+}
+
+interface TmdbFieldErrors {
+  apiHost?: string;
+  apiKey?: string;
+  imageHost?: string;
 }
 
 // 面板只在用户打开时挂载，首帧直接读本地存储，避免默认值渲染后再替换造成跳动
@@ -94,6 +115,7 @@ function readInitialSettings(): InitialSettings {
       isAuthenticated,
     ),
     doubanImageProxyUrl,
+    tmdbSettings: readTmdbSettings(),
   };
 }
 
@@ -126,6 +148,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState(
     initial.doubanImageProxyUrl,
   );
+  const [tmdbSettings, setTmdbSettings] = useState(initial.tmdbSettings);
+  const [tmdbErrors, setTmdbErrors] = useState<TmdbFieldErrors>({});
+  const [testingTmdb, setTestingTmdb] = useState(false);
   const [customProxyErrors, setCustomProxyErrors] = useState<
     Partial<Record<CustomProxyField, string>>
   >({});
@@ -298,6 +323,46 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     }
   };
 
+  const updateTmdbSettings = (patch: Partial<TmdbClientSettings>) => {
+    const next = { ...tmdbSettings, ...patch };
+    setTmdbSettings(next);
+    checkSaved(writeTmdbSettings(next));
+  };
+
+  const handleTmdbEnabledChange = (value: boolean) => {
+    updateTmdbSettings({ enabled: value });
+    if (value && !tmdbSettings.apiKey.trim()) {
+      showToast('已开启，填写 API Key 后才会生效', 'info');
+    }
+  };
+
+  const handleTmdbHostChange = (
+    field: 'apiHost' | 'imageHost',
+    value: string,
+  ) => {
+    updateTmdbSettings({ [field]: value });
+    setTmdbErrors((prev) => ({
+      ...prev,
+      [field]: getTmdbHostInputError(value) || undefined,
+    }));
+  };
+
+  const handleTestTmdb = async () => {
+    setTestingTmdb(true);
+    try {
+      await testTmdbConnection(tmdbSettings);
+      setTmdbErrors((prev) => ({ ...prev, apiKey: undefined }));
+      showToast('测试通过，TMDB 连接可用', 'success');
+    } catch (error) {
+      setTmdbErrors((prev) => ({
+        ...prev,
+        apiKey: describeTmdbClientError(error, 'TMDB 测试失败，请稍后重试'),
+      }));
+    } finally {
+      setTestingTmdb(false);
+    }
+  };
+
   const handleResetSettings = () => {
     const defaultDoubanProxyType = readDefaultDoubanProxyType();
     const defaultDoubanProxy = readDefaultDoubanProxyUrl();
@@ -311,14 +376,17 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     setDoubanDataSource(defaultDoubanProxyType);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
+    setTmdbSettings(DEFAULT_TMDB_SETTINGS);
 
     resetAllLocalPreferenceToggles();
     resetDoubanProxyUrl();
     resetDoubanProxyType();
     resetDoubanImageProxyType();
     resetDoubanImageProxyUrl();
+    resetTmdbSettings();
     clearDoubanImageProxyTypeCookie();
     setCustomProxyErrors({});
+    setTmdbErrors({});
   };
 
   return (
@@ -415,6 +483,48 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
                 />
               )}
             </SettingsRow>
+          </SettingsSection>
+
+          <SettingsSection title='TMDB'>
+            <label
+              htmlFor='local-tmdb-enabled'
+              className='flex cursor-pointer items-center justify-between gap-6 py-3.5'
+            >
+              <span className='min-w-0'>
+                <span className='block text-sm text-gray-900 dark:text-gray-100'>
+                  TMDB 详情页
+                </span>
+                <span className='mt-0.5 block text-xs text-gray-400 dark:text-gray-500'>
+                  启用后豆瓣海报点击先进详情页选季选集，浏览器直连 TMDB，需自行填写
+                  API Key；关闭时点击海报直接搜索播放
+                </span>
+              </span>
+              <span className='relative shrink-0'>
+                <input
+                  id='local-tmdb-enabled'
+                  name='tmdbEnabled'
+                  type='checkbox'
+                  className='peer sr-only'
+                  checked={tmdbSettings.enabled}
+                  onChange={(event) =>
+                    handleTmdbEnabledChange(event.target.checked)
+                  }
+                />
+                <span className='block h-6 w-10 rounded-full bg-gray-200 transition-colors peer-checked:bg-brand-500 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40 dark:bg-white/[0.12]' />
+                <span className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4' />
+              </span>
+            </label>
+
+            {tmdbSettings.enabled && (
+              <TmdbSettingsFields
+                settings={tmdbSettings}
+                errors={tmdbErrors}
+                isTesting={testingTmdb}
+                onHostChange={handleTmdbHostChange}
+                onApiKeyChange={(value) => updateTmdbSettings({ apiKey: value })}
+                onTest={handleTestTmdb}
+              />
+            )}
           </SettingsSection>
 
           <SettingsSection title='功能'>
@@ -601,6 +711,113 @@ function CustomProxyField({
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+const TMDB_INPUT_CLASS =
+  'h-[42px] min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder-gray-400 shadow-sm transition-colors hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:hover:border-gray-500';
+
+// 默认 host 以 placeholder 呈现：存储里空值/非法值会被归一化回默认，输入框显示空即走默认
+function TmdbTextInput({
+  id,
+  label,
+  placeholder,
+  value,
+  error,
+  type = 'text',
+  onChange,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  error?: string;
+  type?: 'text' | 'password';
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <div className='flex items-center gap-2'>
+        <input
+          id={id}
+          name={id}
+          type={type}
+          aria-label={label}
+          aria-invalid={error ? true : undefined}
+          className={TMDB_INPUT_CLASS}
+          placeholder={placeholder}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </div>
+      {error && (
+        <p className='mt-1.5 text-xs text-rose-500 dark:text-rose-400'>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TmdbSettingsFields({
+  settings,
+  errors,
+  isTesting,
+  onHostChange,
+  onApiKeyChange,
+  onTest,
+}: {
+  settings: TmdbClientSettings;
+  errors: TmdbFieldErrors;
+  isTesting: boolean;
+  onHostChange: (field: 'apiHost' | 'imageHost', value: string) => void;
+  onApiKeyChange: (value: string) => void;
+  onTest: () => void;
+}) {
+  return (
+    <div className='space-y-3 pb-1 pt-3'>
+      <TmdbTextInput
+        id='local-tmdb-api-host'
+        label='TMDB API 地址'
+        placeholder={`默认 ${DEFAULT_TMDB_API_HOST}；可填反代或镜像，需支持跨域`}
+        value={settings.apiHost === DEFAULT_TMDB_API_HOST ? '' : settings.apiHost}
+        error={errors.apiHost}
+        onChange={(value) => onHostChange('apiHost', value)}
+      />
+      <div>
+        <div className='flex items-center gap-2'>
+          <input
+            id='local-tmdb-api-key'
+            name='localTmdbApiKey'
+            type='password'
+            aria-label='TMDB API Key'
+            aria-invalid={errors.apiKey ? true : undefined}
+            className={TMDB_INPUT_CLASS}
+            placeholder='API Key：v3 api_key 或 v4 read access token（eyJ 开头）'
+            value={settings.apiKey}
+            onChange={(event) => onApiKeyChange(event.target.value)}
+          />
+          <CustomProxyActions isTesting={isTesting} onTest={onTest} />
+        </div>
+        {errors.apiKey && (
+          <p className='mt-1.5 text-xs text-rose-500 dark:text-rose-400'>
+            {errors.apiKey}
+          </p>
+        )}
+      </div>
+      <TmdbTextInput
+        id='local-tmdb-image-host'
+        label='TMDB 图片地址'
+        placeholder={`默认 ${DEFAULT_TMDB_IMAGE_HOST}；图片加载不通时可换镜像`}
+        value={
+          settings.imageHost === DEFAULT_TMDB_IMAGE_HOST
+            ? ''
+            : settings.imageHost
+        }
+        error={errors.imageHost}
+        onChange={(value) => onHostChange('imageHost', value)}
+      />
     </div>
   );
 }

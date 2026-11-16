@@ -102,7 +102,6 @@ export default async function RootLayout({
     AUTO_SWITCH_SOURCE: publicConfig.AutoSwitchSource,
     ENABLE_DANMAKU: publicConfig.EnableDanmaku,
     ENABLE_USER_DANMAKU: publicConfig.EnableUserDanmaku,
-    TMDB_ENABLED: publicConfig.TmdbEnabled === true,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,
     VOD_PAGE_TIMEOUT_SECONDS: publicConfig.VodPageTimeoutSeconds,

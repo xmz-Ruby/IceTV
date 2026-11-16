@@ -1,4 +1,7 @@
-// TMDB 图片统一走本站代理（/api/tmdb-image），客户端不直连 image.tmdb.org
+import { readTmdbSettings } from '@/lib/tmdb-preferences';
+
+// TMDB 图片由浏览器直连图片 host（<img> 加载不受 CORS 限制），host 在本地设置中可换镜像。
+// 服务端渲染时读不到 localStorage，回落默认 host；该页图片都在客户端数据加载后渲染。
 export type TmdbImageSize =
   | 'w185'
   | 'w300'
@@ -13,5 +16,6 @@ export function tmdbImageUrl(
   size: TmdbImageSize,
 ): string {
   if (!path) return '';
-  return `/api/tmdb-image/${size}${path.startsWith('/') ? path : `/${path}`}`;
+  const base = readTmdbSettings().imageHost;
+  return `${base}/${size}${path.startsWith('/') ? path : `/${path}`}`;
 }

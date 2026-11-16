@@ -12,12 +12,19 @@ import {
   parseTmdbYear,
 } from '@/features/tmdb/lib/resolve';
 import type { TmdbEpisodeTarget } from '@/features/tmdb/lib/source-episode-match';
+import {
+  describeTmdbClientError,
+  fetchTmdbMovieDetail,
+  fetchTmdbSeasonDetail,
+  fetchTmdbShowDetail,
+  resolveBestTmdbMatch,
+  resolveTmdbClientSettings,
+} from '@/features/tmdb/lib/tmdb-client';
 import { tmdbImageUrl } from '@/features/tmdb/lib/tmdb-image-url';
 import type {
   TmdbEpisode,
   TmdbMovieDetail,
   TmdbResolveMatch,
-  TmdbResolveResponse,
   TmdbSeasonDetail,
   TmdbShowDetail,
 } from '@/features/tmdb/types';
@@ -65,7 +72,7 @@ export function SubjectPageClient() {
 
   const seasonCacheRef = useRef(new Map<number, TmdbSeasonDetail>());
 
-  // ① 豆瓣条目 → TMDB 匹配
+  // ① 豆瓣条目 → TMDB 匹配（浏览器直连用户本地设置的 TMDB）
   useEffect(() => {
     if (!title) {
       setPhase('fallback');
@@ -74,12 +81,8 @@ export function SubjectPageClient() {
     }
 
     const controller = new AbortController();
-    const params = new URLSearchParams({ title, type: stype });
-    if (year) params.set('year', year);
-
-    fetch(`/api/tmdb/resolve?${params.toString()}`, { signal: controller.signal })
-      .then(async (response) => {
-        const data = (await response.json()) as TmdbResolveResponse;
+    resolveBestTmdbMatch(title, year, stype, controller.signal)
+      .then((data) => {
         if (controller.signal.aborted) return;
         if (data.status === 'ok' && data.match) {
           setMatch(data.match);
@@ -89,17 +92,19 @@ export function SubjectPageClient() {
           setPhase('fallback');
           setFallbackReason(
             data.status === 'disabled'
-              ? '站点未启用 TMDB'
+              ? '未启用 TMDB 详情页，可在 本地设置 → TMDB 中开启'
               : data.status === 'no-match'
                 ? 'TMDB 未匹配到该剧目'
-                : data.error || 'TMDB 请求失败',
+                : 'TMDB 请求失败',
           );
         }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setPhase('fallback');
-        setFallbackReason('TMDB 请求失败，请稍后重试');
+        setFallbackReason(
+          describeTmdbClientError(error, 'TMDB 请求失败，请稍后重试'),
+        );
         console.error('TMDB resolve 失败:', error);
       });
 
@@ -109,12 +114,16 @@ export function SubjectPageClient() {
   // ② tv 拉详情并推断初始季
   useEffect(() => {
     if (phase !== 'ready' || !match || match.mediaType !== 'tv') return;
+    const settings = resolveTmdbClientSettings();
+    if (!settings) {
+      setPhase('fallback');
+      setFallbackReason('未启用 TMDB 详情页，可在 本地设置 → TMDB 中开启');
+      return;
+    }
 
     const controller = new AbortController();
-    fetch(`/api/tmdb/tv?id=${match.id}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('detail failed');
-        const detail = (await response.json()) as TmdbShowDetail;
+    fetchTmdbShowDetail(settings, match.id, controller.signal)
+      .then((detail) => {
         if (controller.signal.aborted) return;
         setShowDetail(detail);
         const initial = inferInitialSeason(detail.seasons, {
@@ -126,7 +135,7 @@ export function SubjectPageClient() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setPhase('fallback');
-        setFallbackReason('TMDB 详情获取失败');
+        setFallbackReason(describeTmdbClientError(error, 'TMDB 详情获取失败'));
         console.error('TMDB tv 详情失败:', error);
       });
 
@@ -136,12 +145,12 @@ export function SubjectPageClient() {
   // ③ movie 拉详情
   useEffect(() => {
     if (phase !== 'ready' || !match || match.mediaType !== 'movie') return;
+    const settings = resolveTmdbClientSettings();
+    if (!settings) return;
 
     const controller = new AbortController();
-    fetch(`/api/tmdb/movie?id=${match.id}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('detail failed');
-        const detail = (await response.json()) as TmdbMovieDetail;
+    fetchTmdbMovieDetail(settings, match.id, controller.signal)
+      .then((detail) => {
         if (controller.signal.aborted) return;
         setMovieDetail(detail);
       })
@@ -153,7 +162,7 @@ export function SubjectPageClient() {
     return () => controller.abort();
   }, [phase, match]);
 
-  // ④ 当前季的集列表（客户端缓存，切季即时回显）
+  // ④ 当前季的集列表（客户端缓存，切季即时回显；模块级会话缓存叠加防重打）
   useEffect(() => {
     if (phase !== 'ready' || !showDetail || match?.mediaType !== 'tv') return;
 
@@ -163,14 +172,21 @@ export function SubjectPageClient() {
       return;
     }
 
+    const settings = resolveTmdbClientSettings();
+    if (!settings) {
+      setSeasonEpisodes({ data: null, loading: false, error: true });
+      return;
+    }
+
     const controller = new AbortController();
     setSeasonEpisodes({ data: null, loading: true, error: false });
-    fetch(`/api/tmdb/season?id=${showDetail.id}&season=${selectedSeason}`, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('season failed');
-        const detail = (await response.json()) as TmdbSeasonDetail;
+    fetchTmdbSeasonDetail(
+      settings,
+      showDetail.id,
+      selectedSeason,
+      controller.signal,
+    )
+      .then((detail) => {
         if (controller.signal.aborted) return;
         seasonCacheRef.current.set(selectedSeason, detail);
         setSeasonEpisodes({ data: detail, loading: false, error: false });
