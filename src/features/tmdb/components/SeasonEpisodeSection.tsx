@@ -15,10 +15,8 @@ import {
   isEpisodeAired,
 } from '@/features/tmdb/components/subject-layout';
 import { tmdbImageUrl } from '@/features/tmdb/lib/tmdb-image-url';
-import type {
-  TmdbEpisode,
-  TmdbSeasonSummary,
-} from '@/features/tmdb/types';
+import type { TmdbEpisode, TmdbSeasonSummary } from '@/features/tmdb/types';
+import type { TmdbWatchProgress } from '@/lib/types';
 
 interface SeasonEpisodeSectionProps {
   seasons: TmdbSeasonSummary[];
@@ -27,13 +25,18 @@ interface SeasonEpisodeSectionProps {
   episodes: TmdbEpisode[] | null;
   loading: boolean;
   onEpisodeClick: (episode: TmdbEpisode) => void;
+  progress?: TmdbWatchProgress[];
+  progressError?: boolean;
+  onRetryProgress?: () => void;
 }
 
 function seasonLabel(season: TmdbSeasonSummary): string {
   const name = (season.name || '').trim();
   if (!name) return `第 ${season.season_number} 季`;
   // TMDB 中文季名常为「第 1 季」，原名更长时保留原名（主题季名有信息量）
-  return name.length <= 8 ? name : `第${season.season_number}季 ${name.slice(0, 6)}`;
+  return name.length <= 8
+    ? name
+    : `第${season.season_number}季 ${name.slice(0, 6)}`;
 }
 
 export function SeasonEpisodeSection({
@@ -43,7 +46,15 @@ export function SeasonEpisodeSection({
   episodes,
   loading,
   onEpisodeClick,
+  progress = [],
+  progressError = false,
+  onRetryProgress,
 }: SeasonEpisodeSectionProps) {
+  const progressByEpisode = new Map(
+    progress
+      .filter((item) => item.season === selectedSeason)
+      .map((item) => [item.episode, item]),
+  );
   const { containerRef, buttonRefs, indicatorStyle, updatePosition } =
     useCapsuleIndicator();
 
@@ -76,6 +87,21 @@ export function SeasonEpisodeSection({
         )}
       </div>
 
+      {progressError && (
+        <p
+          role='status'
+          className='mb-3 text-xs text-gray-500 dark:text-gray-400'
+        >
+          观看进度暂时不可用
+          <button
+            type='button'
+            onClick={onRetryProgress}
+            className='ml-2 text-brand-600 hover:underline dark:text-brand-400'
+          >
+            重试
+          </button>
+        </p>
+      )}
       {loading && (
         <div className={EPISODE_GRID_CLASS}>
           {Array.from({ length: 12 }, (_, index) => (
@@ -96,6 +122,19 @@ export function SeasonEpisodeSection({
         <div className={EPISODE_GRID_CLASS}>
           {episodes.map((episode) => {
             const aired = isEpisodeAired(episode.air_date);
+            const watched = progressByEpisode.get(episode.episode_number);
+            const ratio =
+              watched && watched.duration > 0
+                ? Math.min(1, Math.max(0, watched.position / watched.duration))
+                : 0;
+            const badge =
+              watched && watched.position > 0
+                ? ratio >= 0.9
+                  ? '已看'
+                  : ratio > 0
+                    ? `看到 ${Math.floor(ratio * 100)}%`
+                    : '观看中'
+                : '';
             return (
               <button
                 key={episode.id}
@@ -117,6 +156,22 @@ export function SeasonEpisodeSection({
                   <span className='absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white'>
                     E{episode.episode_number}
                   </span>
+                  {badge && (
+                    <span className='absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white'>
+                      {badge}
+                    </span>
+                  )}
+                  {ratio > 0 && (
+                    <div
+                      aria-hidden='true'
+                      className='absolute inset-x-0 bottom-0 h-1 bg-black/70'
+                    >
+                      <div
+                        className='h-full bg-brand-500'
+                        style={{ width: `${ratio * 100}%` }}
+                      />
+                    </div>
+                  )}
                   {!aired && (
                     <span className='absolute right-1.5 top-1.5 rounded bg-gray-900/80 px-1.5 py-0.5 text-xs text-gray-200'>
                       未播

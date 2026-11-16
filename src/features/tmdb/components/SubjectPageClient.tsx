@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PageLayout from '@/components/PageLayout';
 import { SeasonEpisodeSection } from '@/features/tmdb/components/SeasonEpisodeSection';
 import { SourceMatchPanel } from '@/features/tmdb/components/SourceMatchPanel';
+import { useTmdbSeasonProgress } from '@/features/tmdb/hooks/useTmdbSeasonProgress';
 import {
   inferInitialSeason,
   parseSeasonMarker,
@@ -83,6 +84,10 @@ export function SubjectPageClient() {
   } | null>(null);
 
   const seasonCacheRef = useRef(new Map<number, TmdbSeasonDetail>());
+  const { progress, progressError, retryProgress } = useTmdbSeasonProgress(
+    match ? `${match.mediaType}/${match.id}` : '',
+    selectedSeason,
+  );
 
   // ① 豆瓣条目 → TMDB 匹配（浏览器直连「本地设置 + 站点默认」合并配置）；
   //    搜索结果直进（tmdbId）时跳过匹配，直接按 id 拉详情
@@ -530,6 +535,9 @@ export function SubjectPageClient() {
           episodes={seasonEpisodes.data?.episodes ?? null}
           loading={seasonEpisodes.loading}
           onEpisodeClick={openPanelForEpisode}
+          progress={progress}
+          progressError={progressError}
+          onRetryProgress={retryProgress}
         />
       )}
 
