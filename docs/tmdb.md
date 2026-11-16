@@ -26,7 +26,7 @@
 
 ## 页面与入口
 
-- 页面：`src/app/subject/`（`AuthenticatedRoute` 挂 layout），客户端组件在 `src/features/tmdb/components/`。骨架与真实组件共用 `subject-layout.ts` 布局常量；TMDB 请求全部由浏览器直发（`tmdb-client.ts`），图片直连图片 host（`tmdbImageUrl()`）。
+- 页面：`src/app/subject/`（`AuthenticatedRoute` 挂 layout），客户端组件在 `src/features/tmdb/components/`。登录后的页面外壳由 `SubjectPageClient` 与 `SubjectSkeleton` 自带 `PageLayout`（`AuthenticatedRoute` 只在门禁态包外壳），漏了会整页无顶栏、无返回按钮。骨架与真实组件共用 `subject-layout.ts` 布局常量；TMDB 请求全部由浏览器直发（`tmdb-client.ts`），图片直连图片 host（`tmdbImageUrl()`）。
 - 源匹配面板（`SourceMatchPanel`）：首个命中源 5s 倒计时自动播放，任意点击/关闭打断。
 - 入口改造集中在 `usePosterPlay` 与 `VideoCard` 的 `playsByTitle` 分支（判定函数 `isTmdbSubjectEntryEnabled()`，读用户本地设置）：启用时跳 `/subject`（本地观看记录的「继续观看」由详情页提供，入口不再短路直跳）；**聚合搜索卡分支不变**，仍直接进播放页。
 

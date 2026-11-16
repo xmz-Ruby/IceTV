@@ -2,8 +2,10 @@
 
 import { Play, RotateCcw } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import PageLayout from '@/components/PageLayout';
 import { SeasonEpisodeSection } from '@/features/tmdb/components/SeasonEpisodeSection';
 import { SourceMatchPanel } from '@/features/tmdb/components/SourceMatchPanel';
 import {
@@ -28,7 +30,10 @@ import type {
   TmdbSeasonDetail,
   TmdbShowDetail,
 } from '@/features/tmdb/types';
-import { getCurrentNavigationPath, withReturnTo } from '@/lib/navigation-return';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { findLocalPlaybackTargetByTitle } from '@/lib/video-prefetch';
 
 type SubjectPhase = 'resolving' | 'ready' | 'fallback';
@@ -65,10 +70,13 @@ export function SubjectPageClient() {
     error: false,
   });
   const [panelOpen, setPanelOpen] = useState(false);
-  const [panelTarget, setPanelTarget] = useState<TmdbEpisodeTarget | null>(null);
-  const [localTarget, setLocalTarget] = useState<{ source: string; id: string } | null>(
+  const [panelTarget, setPanelTarget] = useState<TmdbEpisodeTarget | null>(
     null,
   );
+  const [localTarget, setLocalTarget] = useState<{
+    source: string;
+    id: string;
+  } | null>(null);
 
   const seasonCacheRef = useRef(new Map<number, TmdbSeasonDetail>());
 
@@ -218,7 +226,10 @@ export function SubjectPageClient() {
   const priorEpisodes = useMemo(() => {
     if (!showDetail) return 0;
     return showDetail.seasons
-      .filter((season) => season.season_number > 0 && season.season_number < selectedSeason)
+      .filter(
+        (season) =>
+          season.season_number > 0 && season.season_number < selectedSeason,
+      )
       .reduce((sum, season) => sum + season.episode_count, 0);
   }, [showDetail, selectedSeason]);
 
@@ -313,9 +324,17 @@ export function SubjectPageClient() {
     );
   }, [localTarget, router, title, year, stype]);
 
+  // 登录后本页自带外壳（AuthenticatedRoute 只在门禁态包 PageLayout）：
+  // 顶栏、返回按钮与底部导航由 PageLayout 统一提供
+  const renderInShell = (children: ReactNode) => (
+    <PageLayout activePath='/subject' showDesktopBack mobileHeader={{ title }}>
+      {children}
+    </PageLayout>
+  );
+
   // ── 兜底视图：TMDB 不可用/未匹配，保留旧链路入口，永不死路
   if (phase === 'fallback') {
-    return (
+    return renderInShell(
       <div className='mx-auto w-full max-w-[1680px] px-4 pt-10 sm:px-6 lg:px-8'>
         <div className='flex flex-col gap-6 sm:flex-row'>
           {doubanPoster && (
@@ -361,18 +380,18 @@ export function SubjectPageClient() {
             )}
           </div>
         </div>
-      </div>
+      </div>,
     );
   }
 
   if (phase === 'resolving' || !match) {
-    return (
+    return renderInShell(
       <div
         aria-busy='true'
         className='flex min-h-[50vh] items-center justify-center text-sm text-gray-500 dark:text-gray-400'
       >
         正在匹配 TMDB...
-      </div>
+      </div>,
     );
   }
 
@@ -387,7 +406,9 @@ export function SubjectPageClient() {
   const heroBackdrop = isMovie
     ? movieDetail?.backdrop_path
     : showDetail?.backdrop_path;
-  const heroTitle = isMovie ? movieDetail?.title || title : showDetail?.name || title;
+  const heroTitle = isMovie
+    ? movieDetail?.title || title
+    : showDetail?.name || title;
   const heroDate = isMovie
     ? movieDetail?.release_date
     : showDetail?.first_air_date;
@@ -397,7 +418,7 @@ export function SubjectPageClient() {
     : showDetail?.vote_average;
   const heroOverview = isMovie ? movieDetail?.overview : showDetail?.overview;
 
-  return (
+  return renderInShell(
     <div className='mx-auto w-full max-w-[1680px] px-4 pb-16 pt-6 sm:px-6 lg:px-8'>
       <div className='relative -mx-4 sm:-mx-6 lg:-mx-8'>
         {heroBackdrop && (
@@ -494,6 +515,6 @@ export function SubjectPageClient() {
         target={panelTarget}
         onClose={() => setPanelOpen(false)}
       />
-    </div>
+    </div>,
   );
 }
