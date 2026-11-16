@@ -36,6 +36,7 @@ export interface AdminConfig {
     UpstreamSearchConcurrency: number;
     DoubanProxyType: string;
     DoubanImageProxyType: string;
+    DoubanServerUpstream?: string;
     DisableYellowFilter: boolean;
     FluidSearch: boolean;
     EnableDanmaku: boolean;

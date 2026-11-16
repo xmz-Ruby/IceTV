@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { recommendsCache } from '@/app/api/douban/recommends/cache';
+import {
+  doubanUpstreamFetchInit,
+  resolveDoubanUpstreamMode,
+} from '@/app/api/douban/upstream';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPrivateApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
@@ -64,7 +68,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const target = buildDoubanRecommendUrl({
+  const recommendQuery = {
     kind: kind as 'tv' | 'movie',
     start: pageStart,
     limit: pageLimit,
@@ -75,20 +79,39 @@ export async function GET(request: NextRequest) {
     year: searchParams.get('year'),
     platform: searchParams.get('platform'),
     sort: searchParams.get('sort'),
-  });
+  };
+  const upstreamMode = await resolveDoubanUpstreamMode(
+    searchParams.get('upstream'),
+  );
+  const targets = {
+    web: buildDoubanRecommendUrl(recommendQuery),
+    frodo: buildDoubanRecommendUrl(recommendQuery, 'frodo'),
+  };
   try {
-    // 以完整 target URL 作为缓存键，参数变体天然区分
-    const response = await recommendsCache.getOrLoad(target, async () => {
-      const doubanData =
-        await fetchDoubanData<DoubanRecommendApiResponse>(target);
-      const list = normalizeDoubanRecommendItems(doubanData.items);
-      const payload: DoubanResult = {
-        code: 200,
-        message: '获取成功',
-        list: list,
-      };
-      return payload;
-    });
+    // 以完整 target URL 作为缓存键，参数变体天然区分（web/frodo 各自的 URL 也天然分键）；
+    // frodo 响应与 web 同形，归一化共用
+    const loadFrom = (upstream: 'web' | 'frodo') => {
+      const url = targets[upstream];
+      return recommendsCache.getOrLoad(url, async () => {
+        const doubanData = await fetchDoubanData<DoubanRecommendApiResponse>(
+          url,
+          doubanUpstreamFetchInit(upstream),
+        );
+        const list = normalizeDoubanRecommendItems(doubanData.items);
+        const payload: DoubanResult = {
+          code: 200,
+          message: '获取成功',
+          list: list,
+        };
+        return payload;
+      });
+    };
+    const response = await (upstreamMode === 'frodo'
+      ? loadFrom('frodo')
+      : upstreamMode === 'web'
+        ? loadFrom('web')
+        : // auto：旧豆瓣优先，失败转 frodo
+          loadFrom('web').catch(() => loadFrom('frodo')));
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(response, {

@@ -25,6 +25,7 @@ const baseConfig: AdminConfig = {
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
     DoubanImageProxyType: 'direct',
+    DoubanServerUpstream: 'auto',
     DisableYellowFilter: false,
     FluidSearch: true,
   },

@@ -9,7 +9,23 @@ const DOUBAN_HOSTS = {
     m: 'https://m.douban.cmliussss.com',
     movie: 'https://movie.douban.cmliussss.com',
   },
+  // frodo 是豆瓣 App/小程序接口（与 AndroidCatVodSpider 的豆瓣爬虫同一套公开参数），
+  // 响应与 web rexxar 同形。frodo 校验 key 与客户端身份配对（微信 UA + servicewechat Referer），
+  // 浏览器禁设这两个头，只能由服务端请求；host 的 m 已含 /api/v2 前缀（web 端是 /rexxar/api/v2）
+  frodo: {
+    m: 'https://frodo.douban.com/api/v2',
+    movie: 'https://frodo.douban.com/api/v2',
+  },
 } as const;
+
+// 公开小程序 key（各开源豆瓣爬虫通用），配 DOUBAN_FRODO_HEADERS 使用
+export const DOUBAN_FRODO_APIKEY = '0ac44ae016490db2204ce0a042db2916';
+export const DOUBAN_FRODO_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36 MicroMessenger/7.0.9.501 NetType/WIFI MiniProgramEnv/Windows WindowsWechat',
+  Referer: 'https://servicewechat.com/wx2f9b06c1de1ccfca/84/page-frame.html',
+  Accept: 'application/json, text/plain, */*',
+};
 
 export type DoubanUpstreamHost = keyof typeof DOUBAN_HOSTS;
 
@@ -31,7 +47,10 @@ export function buildDoubanRecentHotUrl(
     category,
     type,
   });
-  return `${DOUBAN_HOSTS[host].m}/rexxar/api/v2/subject/recent_hot/${kind}?${params}`;
+  if (host === 'frodo') params.set('apikey', DOUBAN_FRODO_APIKEY);
+  // web 系走 m.douban.com 的 rexxar 网关；frodo host 的 m 已含 /api/v2 前缀
+  const rexxarPrefix = host === 'frodo' ? '' : '/rexxar/api/v2';
+  return `${DOUBAN_HOSTS[host].m}${rexxarPrefix}/subject/recent_hot/${kind}?${params}`;
 }
 
 export interface DoubanSearchSubjectsQuery {
@@ -103,5 +122,8 @@ export function buildDoubanRecommendUrl(
     tags: tags.join(','),
   });
   if (sort) params.set('sort', sort);
-  return `${DOUBAN_HOSTS[host].m}/rexxar/api/v2/${query.kind}/recommend?${params}`;
+  if (host === 'frodo') params.set('apikey', DOUBAN_FRODO_APIKEY);
+  // web 系走 m.douban.com 的 rexxar 网关；frodo host 的 m 已含 /api/v2 前缀
+  const rexxarPrefix = host === 'frodo' ? '' : '/rexxar/api/v2';
+  return `${DOUBAN_HOSTS[host].m}${rexxarPrefix}/${query.kind}/recommend?${params}`;
 }

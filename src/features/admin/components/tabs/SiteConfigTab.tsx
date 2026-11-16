@@ -22,9 +22,12 @@ import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { SiteConfig } from '@/features/admin/types/internal';
 import {
+  DEFAULT_DOUBAN_SERVER_UPSTREAM,
+  doubanServerUpstreamOptions,
   getThanksInfo,
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
+  normalizeSiteDoubanServerUpstream,
   siteDoubanDataSourceOptions,
   siteDoubanImageProxyTypeOptions,
 } from '@/lib/douban-options';
@@ -63,6 +66,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: DEFAULT_DOUBAN_PROXY_TYPE,
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DoubanServerUpstream: DEFAULT_DOUBAN_SERVER_UPSTREAM,
   SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
   FluidSearch: true,
@@ -84,6 +88,7 @@ type EditableSiteSettings = Pick<
   | 'EnableUserDanmaku'
   | 'DoubanProxyType'
   | 'DoubanImageProxyType'
+  | 'DoubanServerUpstream'
   | 'SourceCoverProxyMode'
   | 'DisableYellowFilter'
   | 'FluidSearch'
@@ -106,6 +111,9 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     ),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
+    ),
+    DoubanServerUpstream: normalizeSiteDoubanServerUpstream(
+      config.SiteConfig.DoubanServerUpstream,
     ),
     SourceCoverProxyMode: normalizeSourceCoverProxyMode(
       config.SiteConfig.SourceCoverProxyMode,
@@ -143,6 +151,9 @@ function normalizeEditableSiteSettings(
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       value.DoubanImageProxyType,
+    ),
+    DoubanServerUpstream: normalizeSiteDoubanServerUpstream(
+      value.DoubanServerUpstream,
     ),
     SourceCoverProxyMode: normalizeSourceCoverProxyMode(
       value.SourceCoverProxyMode,
@@ -228,6 +239,14 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
+    }));
+  };
+
+  // 处理服务端豆瓣上游变化
+  const handleDoubanServerUpstreamChange = (value: string) => {
+    setSiteSettings((prev) => ({
+      ...prev,
+      DoubanServerUpstream: value,
     }));
   };
 
@@ -546,6 +565,18 @@ const SiteConfigComponent = ({
             value={siteSettings.DoubanProxyType}
             onChange={(value) => handleDoubanDataSourceChange(value)}
             options={siteDoubanDataSourceOptions}
+            className='w-full sm:w-80'
+          />
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='服务端豆瓣上游'
+          htmlFor='site-douban-server-upstream'
+        >
+          <AdminSelect
+            id='site-douban-server-upstream'
+            value={siteSettings.DoubanServerUpstream}
+            onChange={(value) => handleDoubanServerUpstreamChange(value)}
+            options={doubanServerUpstreamOptions}
             className='w-full sm:w-80'
           />
         </AdminSettingRow>

@@ -112,25 +112,24 @@ describe('getDoubanCategories in auto mode', () => {
     global.fetch = originalFetch;
   });
 
-  it('uses Zwei first and stops there when it works', async () => {
+  it('uses the tencent mirror first and stops there when it works', async () => {
     fetchMock.mockResolvedValue(upstream);
 
     await getDoubanCategories(params());
 
-    expect(requestedRoutes()).toEqual(['zwei']);
+    expect(requestedRoutes()).toEqual(['tencent']);
   });
 
   it('falls back in order and remembers the working route', async () => {
     fetchMock
       .mockRejectedValueOnce(new TypeError('network'))
-      .mockResolvedValueOnce(response({ error: 'x' }, 502))
       .mockResolvedValueOnce(server)
       .mockResolvedValueOnce(server);
 
     await getDoubanCategories(params());
     await getDoubanCategories(params());
 
-    expect(requestedRoutes()).toEqual(['zwei', 'tencent', 'server', 'server']);
+    expect(requestedRoutes()).toEqual(['tencent', 'server', 'server']);
   });
 
   it('never asks the server for guests', async () => {
@@ -139,7 +138,7 @@ describe('getDoubanCategories in auto mode', () => {
 
     await expect(getDoubanCategories(params())).rejects.toThrow();
 
-    expect(requestedRoutes()).toEqual(['zwei', 'tencent']);
+    expect(requestedRoutes()).toEqual(['tencent']);
   });
 
   it('treats an empty list as a valid answer', async () => {
@@ -149,5 +148,83 @@ describe('getDoubanCategories in auto mode', () => {
       list: [],
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getDoubanCategories direct and server-frodo channels', () => {
+  const originalFetch = global.fetch;
+  let fetchMock: jest.Mock;
+  let page = 2000;
+
+  function params() {
+    page += 1;
+    return {
+      kind: 'movie' as const,
+      category: '热门',
+      type: '全部',
+      pageStart: page * 25,
+    };
+  }
+
+  function routeOf(url: string) {
+    if (url.startsWith('https://m.douban.cmliussss.net/')) return 'tencent';
+    if (url.startsWith('/api/douban/')) return 'server';
+    if (url.startsWith('https://m.douban.com/')) return 'direct';
+    return url;
+  }
+
+  function requestedRoutes() {
+    return fetchMock.mock.calls.map(([url]) => routeOf(String(url)));
+  }
+
+  beforeEach(() => {
+    signedIn = true;
+    window.sessionStorage.clear();
+    fetchMock = jest.fn();
+    global.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    writeDoubanProxyType('auto');
+  });
+
+  it('falls back to the auto chain when the direct channel fails', async () => {
+    writeDoubanProxyType('direct');
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(response({ items: [] }));
+
+    await expect(getDoubanCategories(params())).resolves.toMatchObject({
+      list: [],
+    });
+
+    expect(requestedRoutes()).toEqual(['direct', 'tencent']);
+  });
+
+  it('requests the frodo upstream via the server channel', async () => {
+    writeDoubanProxyType('server-frodo');
+    fetchMock.mockResolvedValue(response({ code: 200, message: 'ok', list: [] }));
+
+    await expect(getDoubanCategories(params())).resolves.toMatchObject({
+      list: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/douban/categories?');
+    expect(String(url)).toContain('upstream=frodo');
+  });
+
+  it('routes guests on server-frodo through the auto chain instead', async () => {
+    signedIn = false;
+    writeDoubanProxyType('server-frodo');
+    fetchMock.mockResolvedValue(response({ items: [] }));
+
+    await expect(getDoubanCategories(params())).resolves.toMatchObject({
+      list: [],
+    });
+
+    expect(requestedRoutes()).toEqual(['tencent']);
   });
 });

@@ -7,6 +7,7 @@ import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
 import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
+  normalizeSiteDoubanServerUpstream,
 } from '@/lib/douban-options';
 import {
   type DoubanImageProxyType,
@@ -295,6 +296,7 @@ async function getInitConfig(
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(
         process.env.NEXT_PUBLIC_SOURCE_COVER_PROXY_MODE,
       ),
+      DoubanServerUpstream: normalizeSiteDoubanServerUpstream(undefined),
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
@@ -537,6 +539,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
+      DoubanServerUpstream: normalizeSiteDoubanServerUpstream(undefined),
     };
   }
   // 兼容旧配置：补全 SiteIcon 字段
@@ -592,6 +595,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     DoubanProxyType: normalizeSiteDoubanProxyType(site.DoubanProxyType),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       site.DoubanImageProxyType,
+    ),
+    DoubanServerUpstream: normalizeSiteDoubanServerUpstream(
+      site.DoubanServerUpstream,
     ),
     SourceCoverProxyMode: normalizeSourceCoverProxyMode(
       site.SourceCoverProxyMode,

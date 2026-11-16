@@ -202,12 +202,9 @@ async function fetchDoubanFromServer(
   return data;
 }
 
-// 第三方公益代理优先，本站服务端兜底（仅登录用户可用）；浏览器直连受跨域限制，不参与自动
-const AUTO_DOUBAN_DATA_ROUTES = [
-  'cors-proxy-zwei',
-  'cmliussss-cdn-tencent',
-  'server',
-] as const;
+// 第三方公益镜像优先，本站服务端兜底（仅登录用户可用）；浏览器直连受跨域限制，不参与自动。
+// zwei 公益代理对豆瓣目标持续 403，已移出自动链（仍可手动选择）
+const AUTO_DOUBAN_DATA_ROUTES = ['cmliussss-cdn-tencent', 'server'] as const;
 
 function isAuthenticated(): boolean {
   return Boolean(getAuthInfoFromBrowserCookie()?.username);
@@ -229,6 +226,10 @@ function fetchDoubanRoute(
       return loader('https://cors-anywhere.com/');
     case 'server':
       return fetchDoubanFromServer(serverPath);
+    case 'server-frodo':
+      return fetchDoubanFromServer(
+        `${serverPath}${serverPath.includes('?') ? '&' : '?'}upstream=frodo`,
+      );
     case 'direct':
     default:
       return loader('');
@@ -283,9 +284,19 @@ function fetchWithDoubanProxy(
     }
     return loader(proxyUrl);
   }
-  // 游客不能用本站服务端，改走自动
-  if (proxyType === 'auto' || (proxyType === 'server' && !isAuthenticated())) {
+  // 游客不能用本站服务端（含 frodo 上游），改走自动
+  if (
+    proxyType === 'auto' ||
+    ((proxyType === 'server' || proxyType === 'server-frodo') &&
+      !isAuthenticated())
+  ) {
     return fetchDoubanAuto(serverPath, loader);
+  }
+  // 直连受豆瓣跨域限制必然失败，失败后回落自动链
+  if (proxyType === 'direct') {
+    return fetchDoubanRoute('direct', serverPath, loader).catch(() =>
+      fetchDoubanAuto(serverPath, loader),
+    );
   }
   return fetchDoubanRoute(proxyType, serverPath, loader);
 }

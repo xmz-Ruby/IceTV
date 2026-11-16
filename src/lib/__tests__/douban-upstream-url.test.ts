@@ -2,6 +2,7 @@ import {
   buildDoubanRecentHotUrl,
   buildDoubanRecommendUrl,
   buildDoubanSearchSubjectsUrl,
+  DOUBAN_FRODO_APIKEY,
 } from '../douban-upstream-url';
 
 describe('douban upstream urls', () => {
@@ -59,5 +60,39 @@ describe('douban upstream urls', () => {
       地区: '日本',
     });
     expect(url.searchParams.has('sort')).toBe(false);
+  });
+
+  it('builds frodo urls with the app prefix and api key', () => {
+    const recentHot = new URL(
+      buildDoubanRecentHotUrl(
+        { kind: 'tv', category: '热门', type: '剧集', start: 25, limit: 25 },
+        'frodo',
+      ),
+    );
+
+    expect(recentHot.origin).toBe('https://frodo.douban.com');
+    expect(recentHot.pathname).toBe('/api/v2/subject/recent_hot/tv');
+    expect(recentHot.searchParams.get('apikey')).toBe(DOUBAN_FRODO_APIKEY);
+    expect(recentHot.searchParams.get('start')).toBe('25');
+
+    const recommend = new URL(
+      buildDoubanRecommendUrl(
+        {
+          kind: 'tv',
+          start: 0,
+          limit: 25,
+          category: '电视剧',
+          region: '日本',
+          sort: 'S',
+        },
+        'frodo',
+      ),
+    );
+
+    expect(recommend.origin).toBe('https://frodo.douban.com');
+    expect(recommend.pathname).toBe('/api/v2/tv/recommend');
+    expect(recommend.searchParams.get('apikey')).toBe(DOUBAN_FRODO_APIKEY);
+    expect(recommend.searchParams.get('tags')).toBe('电视剧,日本');
+    expect(recommend.searchParams.get('sort')).toBe('S');
   });
 });

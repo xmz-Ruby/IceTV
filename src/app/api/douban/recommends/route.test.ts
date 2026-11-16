@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 
+import { recommendsCache } from '@/app/api/douban/recommends/cache';
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { fetchDoubanData } from '@/lib/douban';
 
@@ -7,6 +8,9 @@ installWebPolyfills();
 
 jest.mock('@/lib/config', () => ({
   getCacheTime: jest.fn().mockResolvedValue(300),
+  getConfigForRead: jest
+    .fn()
+    .mockResolvedValue({ SiteConfig: { DoubanServerUpstream: 'auto' } }),
 }));
 
 jest.mock('@/lib/douban', () => ({
@@ -29,6 +33,7 @@ function createRequest(url: string): NextRequest {
 describe('douban recommends route input validation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    recommendsCache.clear();
   });
 
   it('rejects kind values outside the whitelist', async () => {
@@ -84,6 +89,7 @@ describe('douban recommends route input validation', () => {
     expect(response.headers.has('Netlify-Vary')).toBe(false);
     expect(fetchDoubanData).toHaveBeenCalledWith(
       expect.stringContaining('start=10&count=30'),
+      expect.anything(),
     );
   });
 
@@ -101,6 +107,43 @@ describe('douban recommends route input validation', () => {
     expect(response.headers.has('Netlify-Vary')).toBe(false);
     expect(fetchDoubanData).toHaveBeenCalledWith(
       expect.stringContaining('start=0&count=20'),
+      expect.anything(),
     );
+  });
+
+  it('requests the frodo upstream when the client asks for it', async () => {
+    (fetchDoubanData as jest.Mock).mockResolvedValue({ items: [] });
+
+    const response = await GET(
+      createRequest(
+        'http://localhost/api/douban/recommends?kind=tv&upstream=frodo',
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const calls = (fetchDoubanData as jest.Mock).mock.calls.map(([url]) =>
+      String(url),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('https://frodo.douban.com/api/v2/tv/recommend');
+    expect(calls[0]).toContain('apikey=');
+  });
+
+  it('falls back to frodo in auto mode when the web upstream fails', async () => {
+    (fetchDoubanData as jest.Mock)
+      .mockRejectedValueOnce(new Error('web upstream down'))
+      .mockResolvedValueOnce({ items: [] });
+
+    const response = await GET(
+      createRequest('http://localhost/api/douban/recommends?kind=tv'),
+    );
+
+    expect(response.status).toBe(200);
+    const calls = (fetchDoubanData as jest.Mock).mock.calls.map(([url]) =>
+      String(url),
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('https://m.douban.com/rexxar/api/v2/');
+    expect(calls[1]).toContain('https://frodo.douban.com/api/v2/');
   });
 });

@@ -2,12 +2,16 @@ import type { NextRequest } from 'next/server';
 
 import { doubanRouteCache } from '@/app/api/douban/cache';
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { getConfigForRead } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 
 installWebPolyfills();
 
 jest.mock('@/lib/config', () => ({
   getCacheTime: jest.fn().mockResolvedValue(300),
+  getConfigForRead: jest
+    .fn()
+    .mockResolvedValue({ SiteConfig: { DoubanServerUpstream: 'auto' } }),
 }));
 
 jest.mock('@/lib/douban', () => ({
@@ -102,5 +106,64 @@ describe('douban categories route input validation', () => {
     const target = new URL((fetchDoubanData as jest.Mock).mock.calls.at(-1)[0]);
     expect(target.searchParams.get('category')).toBe('美剧 & 韩剧');
     expect(target.searchParams.get('type')).toBe('tv');
+  });
+
+  it('requests the frodo upstream when the client asks for it', async () => {
+    (fetchDoubanData as jest.Mock).mockResolvedValue({ items: [] });
+
+    const response = await GET(
+      createRequest(
+        'http://localhost/api/douban/categories?kind=tv&category=%E7%83%AD%E9%97%A8&type=tv&upstream=frodo',
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const calls = (fetchDoubanData as jest.Mock).mock.calls.map(([url]) =>
+      String(url),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain(
+      'https://frodo.douban.com/api/v2/subject/recent_hot/tv',
+    );
+    expect(calls[0]).toContain('apikey=');
+  });
+
+  it('forces frodo when the site config pins the server upstream', async () => {
+    (fetchDoubanData as jest.Mock).mockResolvedValue({ items: [] });
+    (getConfigForRead as jest.Mock).mockResolvedValueOnce({
+      SiteConfig: { DoubanServerUpstream: 'frodo' },
+    });
+
+    await GET(
+      createRequest(
+        'http://localhost/api/douban/categories?kind=tv&category=%E7%83%AD%E9%97%A8&type=tv',
+      ),
+    );
+
+    const calls = (fetchDoubanData as jest.Mock).mock.calls.map(([url]) =>
+      String(url),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('https://frodo.douban.com/api/v2');
+  });
+
+  it('falls back to frodo in auto mode when the web upstream fails', async () => {
+    (fetchDoubanData as jest.Mock)
+      .mockRejectedValueOnce(new Error('web upstream down'))
+      .mockResolvedValueOnce({ items: [] });
+
+    const response = await GET(
+      createRequest(
+        'http://localhost/api/douban/categories?kind=tv&category=%E7%83%AD%E9%97%A8&type=tv',
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const calls = (fetchDoubanData as jest.Mock).mock.calls.map(([url]) =>
+      String(url),
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('https://m.douban.com/rexxar/api/v2/');
+    expect(calls[1]).toContain('https://frodo.douban.com/api/v2/');
   });
 });

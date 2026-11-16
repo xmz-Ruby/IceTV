@@ -9,6 +9,7 @@ export const DOUBAN_PROXY_TYPE_VALUES = [
   'auto',
   'direct',
   'server',
+  'server-frodo',
   'cors-proxy-zwei',
   'cmliussss-cdn-tencent',
   'cmliussss-cdn-ali',

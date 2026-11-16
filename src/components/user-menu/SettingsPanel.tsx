@@ -601,7 +601,8 @@ function markServerProxyOption<T extends { value: string; label: string }>(
   isAuthenticated: boolean,
 ) {
   return options.map((option) =>
-    option.value === 'server' && !isAuthenticated
+    (option.value === 'server' || option.value === 'server-frodo') &&
+    !isAuthenticated
       ? {
           ...option,
           disabled: true,
@@ -612,7 +613,7 @@ function markServerProxyOption<T extends { value: string; label: string }>(
 }
 
 function canSelectProxyValue(value: string, isAuthenticated: boolean): boolean {
-  return value !== 'server' || isAuthenticated;
+  return (value !== 'server' && value !== 'server-frodo') || isAuthenticated;
 }
 
 function isInvalidCustomProxy(source: string, proxyUrl: string) {

@@ -31,6 +31,7 @@ export interface SiteConfig {
   UpstreamSearchConcurrency: number;
   DoubanProxyType: string;
   DoubanImageProxyType: string;
+  DoubanServerUpstream: string;
   DisableYellowFilter: boolean;
   FluidSearch: boolean;
 }

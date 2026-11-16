@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { doubanRouteCache } from '@/app/api/douban/cache';
+import {
+  doubanUpstreamFetchInit,
+  resolveDoubanUpstreamMode,
+} from '@/app/api/douban/upstream';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPrivateApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
@@ -71,19 +75,48 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const target = buildDoubanRecentHotUrl({
-    kind: kind as 'tv' | 'movie',
-    category,
-    type,
-    start: pageStart,
-    limit: pageLimit,
-  });
+  const upstreamMode = await resolveDoubanUpstreamMode(
+    searchParams.get('upstream'),
+  );
+  const targets = {
+    web: buildDoubanRecentHotUrl({
+      kind: kind as 'tv' | 'movie',
+      category,
+      type,
+      start: pageStart,
+      limit: pageLimit,
+    }),
+    frodo: buildDoubanRecentHotUrl(
+      {
+        kind: kind as 'tv' | 'movie',
+        category,
+        type,
+        start: pageStart,
+        limit: pageLimit,
+      },
+      'frodo',
+    ),
+  };
 
   try {
-    // 调用豆瓣 API
-    const doubanData = (await doubanRouteCache.getOrLoad(target, () =>
-      fetchDoubanData<DoubanCategoryApiResponse>(target),
-    )) as DoubanCategoryApiResponse;
+    // 调用豆瓣 API：frodo 响应与 web 同形；各自 URL 天然分缓存 key，失败不落缓存
+    const loadFrom = (upstream: 'web' | 'frodo') => {
+      const url = targets[upstream];
+      return doubanRouteCache.getOrLoad(url, () =>
+        fetchDoubanData<DoubanCategoryApiResponse>(
+          url,
+          doubanUpstreamFetchInit(upstream),
+        ),
+      );
+    };
+    const doubanData = (await (upstreamMode === 'frodo'
+      ? loadFrom('frodo')
+      : upstreamMode === 'web'
+        ? loadFrom('web')
+        : // auto：旧豆瓣优先，失败转 frodo
+          loadFrom('web').catch(() =>
+            loadFrom('frodo'),
+          ))) as DoubanCategoryApiResponse;
 
     const list = normalizeDoubanCategoryItems(doubanData.items);
 

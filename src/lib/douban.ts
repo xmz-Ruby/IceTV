@@ -5,7 +5,7 @@ import {
 } from '@/lib/proxy-response-limits';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
-type DoubanFetchInit = RequestInit & {
+export type DoubanFetchInit = RequestInit & {
   next?: {
     revalidate?: number;
   };
