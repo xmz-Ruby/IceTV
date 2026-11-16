@@ -77,6 +77,7 @@
 ## 观看历史与观看统计
 
 - 三份数据各自独立：`play_records` 管继续观看与追更；`watch_history` 是「我的 - 历史」，每个用户在一个源的一部作品（`source + video_id`）一条，用户可物理删除；`playback_sessions` 与 `playback_watch_buckets` 是观看统计，用户不可删，删除历史或继续观看都不影响统计。删除账户时三者一并清除。
+- `tmdb_watch_progress` 是与上述记录平行保存的 TMDB 坐标进度，坐标与播放记录同事务写入；具体身份、读取与删除语义见 [TMDB 坐标进度](tmdb.md#tmdb-坐标进度)。两后端保存采集时间较新的值，SQLite 用户名合并按同一坐标取较新记录；删号与不活跃清理均覆盖本表。
 - 历史只在播放上报不带历史 id 时按 `(username, source, video_id)` 新建或取回；带 id 的上报只更新，命中 0 行即返回 `historyId: null`，**不得改成 upsert**，否则用户删除后仍在播放的页面会把记录写回。旧数据迁移同理只跑一次：完成标记是 `storage_migrations` 中的 `watch_history_v1`，与迁移写入同一事务提交；不能在启动时按缺失补建。
 - `playback_watch_buckets.watch_ms` 是会话在一个 15 分钟 UTC 对齐桶内的**累计值**，写入取 `MAX`，重试与乱序不会重复累计；改成增量相加会在重发时翻倍。`measurement_version = 2` 的会话 `watch_seconds` 由服务端按桶汇总，`1` 为旧口径（客户端估算、无桶，只能按起播时间归属）。
 - 年度报告只读统计会话与时间桶，不读取观看历史；v2 按真实桶归属时区日期，v1 将 `watch_seconds` 从 `started_at` 起连续摊开成合成桶，并单列估算时长。评价按 `created_at` 归属年份，编辑旧评价不计入当年。报告只统计「看过的作品数」而非「看完 N 部」：看过时间会随状态修改被移除，会话也不记录总集数，无法可靠判定完结。

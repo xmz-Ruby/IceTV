@@ -11,7 +11,11 @@ import {
   matchSourceEntryForEpisode,
   rankSourceEpisodeMatches,
 } from '@/features/tmdb/lib/source-episode-match';
-import { getCurrentNavigationPath, withReturnTo } from '@/lib/navigation-return';
+import { resolveEpisodeGroupPosition } from '@/lib/episode-groups';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import type { SearchResult } from '@/lib/types';
 
@@ -26,6 +30,7 @@ interface SourceMatchPanelProps {
   year: string;
   /** stype：tv | movie */
   searchType: string;
+  mediaKey: string;
   target: TmdbEpisodeTarget | null;
   onClose: () => void;
 }
@@ -52,6 +57,7 @@ export function SourceMatchPanel({
   displayTitle,
   year,
   searchType,
+  mediaKey,
   target,
   onClose,
 }: SourceMatchPanelProps) {
@@ -78,16 +84,37 @@ export function SourceMatchPanel({
 
   const goToPlay = useCallback(
     (item: SourceEpisodeMatchResult) => {
-      if (item.status !== 'matched' || item.episodeIndex === null) return;
+      if (item.status !== 'matched' || item.episodeIndex === null || !target)
+        return;
       setPlayed(true);
       setCountdown(null);
       // 定位到具体集：写一次性播放意图，播放页历史恢复会优先消费（压过播放记录），
       // 且详情就绪后才应用（集数/分组换算正确），避免另造 URL 参数被刷新重放。
+      const group = resolveEpisodeGroupPosition(
+        item.result.episode_groups,
+        item.episodeIndex,
+        item.result.episodes.length,
+      );
       savePlayIntent({
         source: item.result.source,
         id: item.result.id,
         episodeIndex: item.episodeIndex,
         resumeTime: 0,
+        ...(group
+          ? {
+              groupLabel: item.result.episode_groups?.[group.groupIndex]?.label,
+              groupIndex: group.episodeOffset + 1,
+              groupTotal: group.groupCount,
+            }
+          : {}),
+        tmdbCoordinate: {
+          media_key: mediaKey,
+          season: target.season,
+          episode: target.episode,
+          source: item.result.source,
+          video_id: item.result.id,
+          source_episode_index: item.episodeIndex + 1,
+        },
       });
       const url = withReturnTo(
         buildPlayUrl(item, { searchTitle, year, searchType }),
@@ -95,7 +122,7 @@ export function SourceMatchPanel({
       );
       router.push(url);
     },
-    [router, searchTitle, searchType, year],
+    [mediaKey, router, searchTitle, searchType, target, year],
   );
 
   const runSearch = useCallback(

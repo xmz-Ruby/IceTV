@@ -27,7 +27,13 @@ import {
   selectRecentPlayRecords,
 } from './play-records';
 import { getRuntimeConfig } from './runtime-config';
-import type { Favorite, PlayRecord, SkipConfig } from './types';
+import type {
+  Favorite,
+  PlayRecord,
+  SkipConfig,
+  TmdbEpisodeCoordinate,
+  TmdbWatchProgress,
+} from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -255,10 +261,39 @@ export function getCachedPlayRecordsSnapshot(): Record<
   return cacheManager.getCachedPlayRecords();
 }
 
+export async function getTmdbWatchProgressByMediaKey(
+  mediaKey: string,
+  season: number,
+): Promise<TmdbWatchProgress[]> {
+  const items: TmdbWatchProgress[] = [];
+  let afterEpisode: number | null = 0;
+  while (afterEpisode !== null) {
+    const params = new URLSearchParams({
+      mediaKey,
+      season: String(season),
+      afterEpisode: String(afterEpisode),
+    });
+    const page: { items: TmdbWatchProgress[]; nextEpisode: number | null } =
+      await fetchFromApi(`/api/tmdb/history?${params}`);
+    items.push(...page.items);
+    afterEpisode = page.nextEpisode;
+  }
+  return items;
+}
+
+export async function getTmdbWatchProgressBySource(
+  source: string,
+  id: string,
+): Promise<TmdbWatchProgress[]> {
+  const params = new URLSearchParams({ source, id });
+  return fetchFromApi<TmdbWatchProgress[]>(`/api/tmdb/history?${params}`);
+}
+
 export async function savePlayRecord(
   source: string,
   id: string,
   record: PlayRecord,
+  tmdbCoordinate?: TmdbEpisodeCoordinate,
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   const cached = cacheManager.getCachedPlayRecords();
@@ -276,7 +311,11 @@ export async function savePlayRecord(
           fetchWithAuth('/api/playrecords', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, record: normalizedRecord }),
+            body: JSON.stringify({
+              key,
+              record: normalizedRecord,
+              ...(tmdbCoordinate ? { tmdbCoordinate } : {}),
+            }),
             keepalive: true,
           }).then(() => {}),
         {

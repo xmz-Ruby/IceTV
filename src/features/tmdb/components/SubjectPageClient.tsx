@@ -539,6 +539,7 @@ export function SubjectPageClient() {
         displayTitle={title || heroTitle}
         year={year}
         searchType={isMovie ? 'movie' : 'tv'}
+        mediaKey={`${match.mediaType}/${match.id}`}
         target={panelTarget}
         onClose={() => setPanelOpen(false)}
       />

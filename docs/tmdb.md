@@ -27,6 +27,14 @@
 - 源检索关键词用 `strippedTitle`（剥季标记后的剧名），复用 `/api/search` 聚合接口，**不要另造搜索链路**。
 - 选定源与集后：`savePlayIntent({ source, id, episodeIndex, resumeTime: 0 })`（`src/lib/play-intent.ts` 的一次性意图，播放页历史恢复会优先消费并压过播放记录）→ 跳 `/play?source=&id=&title=&stitle=&directStart=true`。不要用 URL 参数传集号——刷新会重放且绕过分组换算。
 
+## TMDB 坐标进度
+
+- 原有 `play_records` 仍以源与条目存继续观看，`watch_history` 与观看统计不变；额外的 `tmdb_watch_progress` 按 **用户 + mediaKey + season + episode** 保存每集进度，`mediaKey` 为 `tv/95842` / `movie/399566`，电影固定第 0 季第 1 集。进度单位为秒，保存最近一次播放的源、条目与源内集序号，用于找回作品身份。
+- `/subject` 选集把坐标附在一次性 `play-intent` 中，仍不把选集指令写入 URL。播放器在后台按当前实际源与集清单复用集匹配器反查坐标；换集、线路变更和详情刷新会重新定位，旧请求取消后不回写。直进播放先读该源最近的坐标以找回作品，再按当前清单重新匹配；无历史则复用标题匹配。源数组下标不能直接当作 TMDB 集号，连播源须换算此前季的集数。
+- 坐标匹配不阻塞原有起播和续播。TMDB 未启用、匹配失败或一集对应多个坐标时，只保存原有播放记录；换源只有已确认同一集时才携带坐标提示，新源仍重新核对。
+- 进度仍走 `/api/playrecords` 原写入出口，附带的 `tmdbCoordinate` 须与本次源、条目和集索引一致。两份记录在同一数据库事务保存，坐标按进度采集时间防止迟到重试覆盖新值，不用 `MAX(position)`，以保留重新播放时的真实进度。
+- `/api/tmdb/history` 只读当前登录用户的坐标：`mediaKey + season + afterEpisode` 按集号游标分页，`source + id` 返回该源最近的一个坐标作为作品提示；浏览器 helper 负责逐页读取一季。此 API 不代理 TMDB 请求、不保存用户 Key。删除继续观看或观看历史不删除坐标，删除账号一并清理。
+
 ## 页面与入口
 
 - 页面：`src/app/subject/`（`AuthenticatedRoute` 挂 layout），客户端组件在 `src/features/tmdb/components/`。登录后的页面外壳由 `SubjectPageClient` 与 `SubjectSkeleton` 自带 `PageLayout`（`AuthenticatedRoute` 只在门禁态包外壳），漏了会整页无顶栏、无返回按钮。骨架与真实组件共用 `subject-layout.ts` 布局常量；TMDB 请求全部由浏览器直发（`tmdb-client.ts`），图片直连图片 host（`tmdbImageUrl()`）。

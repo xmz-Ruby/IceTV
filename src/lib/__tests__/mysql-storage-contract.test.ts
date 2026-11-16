@@ -7,6 +7,7 @@ import {
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertTmdbWatchProgress } from '@/lib/__tests__/__fixtures__/tmdb-watch-progress-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
@@ -72,6 +73,9 @@ type FakeState = {
   userDanmaku: Map<string, StoredUserDanmaku>;
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
+  tmdbProgress: (import('@/lib/types').TmdbWatchProgress & {
+    username: string;
+  })[];
   watchHistory: Record<string, any>[];
   watchBuckets: Record<string, any>[];
   historyMigrated: boolean;
@@ -125,6 +129,7 @@ function cloneState(state: FakeState): FakeState {
     playbackSessions: new Map(
       [...state.playbackSessions].map(([id, row]) => [id, { ...row }]),
     ),
+    tmdbProgress: state.tmdbProgress.map((row) => ({ ...row })),
     watchHistory: state.watchHistory.map((row) => ({ ...row })),
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
     historyMigrated: state.historyMigrated,
@@ -174,6 +179,7 @@ function createState(): FakeState {
     userDanmaku: new Map(),
     skipConfigs: new Map(),
     playbackSessions: new Map(),
+    tmdbProgress: [],
     watchHistory: [],
     watchBuckets: [],
     historyMigrated: false,
@@ -371,6 +377,59 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.startsWith('INSERT INTO tmdb_watch_progress')) {
+      const [
+        username,
+        media_key,
+        season,
+        episode,
+        source,
+        video_id,
+        source_episode_index,
+        position,
+        duration,
+        updated_at,
+      ] = params as [
+        string,
+        string,
+        number,
+        number,
+        string,
+        string,
+        number,
+        number,
+        number,
+        number,
+      ];
+      const next = {
+        username,
+        media_key,
+        season,
+        episode,
+        source,
+        video_id,
+        source_episode_index,
+        position,
+        duration,
+        updated_at,
+      };
+      const row = currentState.tmdbProgress.find(
+        (item) =>
+          item.username === username &&
+          item.media_key === media_key &&
+          item.season === season &&
+          item.episode === episode,
+      );
+      if (!row) currentState.tmdbProgress.push(next);
+      else if (row.updated_at <= updated_at) Object.assign(row, next);
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM tmdb_watch_progress')) {
+      currentState.tmdbProgress = currentState.tmdbProgress.filter(
+        (row) => row.username !== params[0],
+      );
+      return [{ affectedRows: 1 }, []];
+    }
     if (normalized.startsWith('INSERT IGNORE INTO user_notice_events')) {
       const rows = (currentState.social.user_notice_events ??= []);
       if (
@@ -1504,6 +1563,36 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.includes('FROM tmdb_watch_progress')) {
+      let rows = currentState.tmdbProgress.filter(
+        (row) => row.username === params[0],
+      );
+      if (normalized.includes('media_key = ?')) {
+        rows = rows
+          .filter(
+            (row) =>
+              row.media_key === params[1] &&
+              row.season === params[2] &&
+              row.episode > Number(params[3]),
+          )
+          .sort((a, b) => a.episode - b.episode)
+          .slice(0, Number(params[4]));
+      } else {
+        rows = rows
+          .filter(
+            (row) => row.source === params[1] && row.video_id === params[2],
+          )
+          .sort(
+            (a, b) =>
+              b.updated_at - a.updated_at ||
+              a.media_key.localeCompare(b.media_key) ||
+              a.season - b.season ||
+              a.episode - b.episode,
+          )
+          .slice(0, 1);
+      }
+      return [rows.map(({ username: _username, ...row }) => row), []];
+    }
     if (
       normalized ===
       "SHOW COLUMNS FROM config_subscription LIKE 'failure_since'"
@@ -2908,6 +2997,12 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it('TMDB 坐标隔离、跨源覆盖、分页和双写回滚', async () => {
+    await assertTmdbWatchProgress(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+
   it('rolls back the complete health search batch on a later row failure', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const row = {

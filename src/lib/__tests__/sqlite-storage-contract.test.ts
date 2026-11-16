@@ -12,6 +12,7 @@ import {
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
+import { assertTmdbWatchProgress } from '@/lib/__tests__/__fixtures__/tmdb-watch-progress-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
@@ -30,6 +31,10 @@ import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+it('TMDB 坐标进度隔离、跨源覆盖、分页和原子双写', async () => {
+  await assertTmdbWatchProgress(new LocalSqliteStorage(':memory:'));
+});
 
 it('批量读取隔离用户并省略缺失键', async () => {
   await assertBatchReadPlayRecords(new LocalSqliteStorage(':memory:'));

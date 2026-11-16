@@ -13,6 +13,7 @@ import {
   parsePlayRecordCursor,
 } from '@/lib/play-records';
 import { isSeriesStatus } from '@/lib/series-status';
+import { isValidTmdbEpisodeCoordinate } from '@/lib/tmdb-watch-history';
 import { PlayRecord } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -89,8 +90,15 @@ export async function POST(request: NextRequest) {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const body = await request.json();
-    const { key, record }: { key: string; record: PlayRecord } = body;
+    const {
+      key,
+      record,
+      tmdbCoordinate,
+    }: {
+      key: string;
+      record: PlayRecord;
+      tmdbCoordinate?: unknown;
+    } = await request.json();
 
     if (!key || !record) {
       return NextResponse.json(
@@ -124,6 +132,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (
+      tmdbCoordinate !== undefined &&
+      (!isValidTmdbEpisodeCoordinate(tmdbCoordinate) ||
+        tmdbCoordinate.source !== parsed.source ||
+        tmdbCoordinate.video_id !== parsed.id ||
+        tmdbCoordinate.source_episode_index !== record.index ||
+        !Number.isFinite(record.play_time) ||
+        record.play_time < 0 ||
+        !Number.isFinite(record.total_time) ||
+        record.total_time < 0 ||
+        (record.save_time !== undefined &&
+          (!Number.isSafeInteger(record.save_time) || record.save_time < 0)))
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid TMDB coordinate' },
+        { status: 400 },
+      );
+    }
+
     const now = Date.now();
     const existingRecord = await db.getPlayRecord(
       guardResult.username,
@@ -136,12 +163,27 @@ export async function POST(request: NextRequest) {
       metadata_checked_at: now,
     } as PlayRecord);
 
-    await db.savePlayRecord(
-      guardResult.username,
-      parsed.source,
-      parsed.id,
-      finalRecord,
-    );
+    if (isValidTmdbEpisodeCoordinate(tmdbCoordinate)) {
+      await db.savePlayRecord(
+        guardResult.username,
+        parsed.source,
+        parsed.id,
+        finalRecord,
+        {
+          ...tmdbCoordinate,
+          position: record.play_time,
+          duration: record.total_time,
+          updated_at: Math.min(record.save_time ?? now, now),
+        },
+      );
+    } else {
+      await db.savePlayRecord(
+        guardResult.username,
+        parsed.source,
+        parsed.id,
+        finalRecord,
+      );
+    }
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {

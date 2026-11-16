@@ -194,6 +194,30 @@ describe('SQLite 遗留用户名大小写归一化', () => {
     ]);
   });
 
+  it('TMDB 坐标用户名合并取更新记录并覆盖仅有坐标数据的账号', async () => {
+    seed((db) => {
+      const insert = db.prepare(`INSERT INTO tmdb_watch_progress (
+        username, media_key, season, episode, source, video_id, source_episode_index, position, duration, updated_at
+      ) VALUES (?, 'tv/95842', 2, ?, 'src', 'id', ?, ?, 1500, ?)`);
+      insert.run('OWNER', 1, 1, 300, 5000);
+      insert.run('owner', 1, 1, 30, 1000);
+      insert.run('OWNER', 2, 2, 600, 6000);
+    });
+    const storage = openStorage();
+    expect(
+      await storage.getTmdbWatchProgressByMediaKey('owner', 'tv/95842', 2),
+    ).toEqual([
+      expect.objectContaining({ episode: 1, position: 300, updated_at: 5000 }),
+      expect.objectContaining({ episode: 2, position: 600, updated_at: 6000 }),
+    ]);
+    const database = (storage as unknown as { db: Database.Database }).db;
+    expect(
+      database
+        .prepare('SELECT DISTINCT username FROM tmdb_watch_progress')
+        .all(),
+    ).toEqual([{ username: 'owner' }]);
+  });
+
   it('迁移是幂等的，重复启动不会重复处理', async () => {
     seed((db) => {
       db.prepare(

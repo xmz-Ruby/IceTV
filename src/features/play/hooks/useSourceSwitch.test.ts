@@ -16,13 +16,14 @@ import {
   writeDanmakuEpisodeId,
   writeDanmakuEpisodeSearchTitle,
 } from '@/lib/local-preferences';
+import { savePlayIntent } from '@/lib/play-intent';
 import type { ManagedVideoElement } from '@/lib/player-runtime';
 import {
   readSourcePlaybackStats,
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
 import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
-import type { SearchResult } from '@/lib/types';
+import type { SearchResult, TmdbEpisodeCoordinate } from '@/lib/types';
 
 jest.mock('@/features/play/lib/sourceProbeStore', () => ({
   ...jest.requireActual('@/features/play/lib/sourceProbeStore'),
@@ -109,7 +110,9 @@ function createMultiLineSource(source: string): SearchResult {
   const lineB = {
     key: '线路B:0',
     label: '线路B',
-    episodes: base.episodes.map((_, index) => `https://${source}-b.example/${index}.m3u8`),
+    episodes: base.episodes.map(
+      (_, index) => `https://${source}-b.example/${index}.m3u8`,
+    ),
     episodes_titles: base.episodes_titles,
   };
   return { ...base, playback_lines: [lineA, lineB], playback_line: lineA.key };
@@ -197,6 +200,7 @@ function setupHook({
     pendingSourceSwitchCleanupRef: { current: null },
     sourceChangeRequestIdRef: { current: 0 },
     videoUrlRef: { current: videoUrl },
+    tmdbCoordinateRef: { current: null as TmdbEpisodeCoordinate | null },
     setError: jest.fn(),
     setVideoUrl: jest.fn(),
     setVideoTitle: jest.fn(),
@@ -305,7 +309,10 @@ describe('useSourceSwitch 自动换源', () => {
 
   it('多线路源播放失败先轮换本源线路，不依赖自动换源开关', () => {
     const { result, options } = setupHook({
-      availableSources: [createMultiLineSource('a'), createSource('b', THREE_EPISODES)],
+      availableSources: [
+        createMultiLineSource('a'),
+        createSource('b', THREE_EPISODES),
+      ],
     });
 
     expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
@@ -321,7 +328,10 @@ describe('useSourceSwitch 自动换源', () => {
   it('本源线路轮换用尽后才落到跨源换源', async () => {
     localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
     const { result, options } = setupHook({
-      availableSources: [createMultiLineSource('a'), createSource('b', THREE_EPISODES)],
+      availableSources: [
+        createMultiLineSource('a'),
+        createSource('b', THREE_EPISODES),
+      ],
     });
 
     // 第一次失败：切到线路 B
@@ -965,6 +975,34 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     jest.restoreAllMocks();
+  });
+
+  it('已确认同一集的换源继承 TMDB 坐标，只替换源内索引', async () => {
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+    });
+    const coordinate = {
+      media_key: 'tv/95842',
+      season: 2,
+      episode: 3,
+      source: 'a',
+      video_id: 'a-id',
+      source_episode_index: 3,
+    };
+    options.tmdbCoordinateRef!.current = coordinate;
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(options.tmdbCoordinateRef!.current).toEqual({
+      ...coordinate,
+      source: 'b',
+      video_id: 'b-id',
+    });
+    expect(savePlayIntent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tmdbCoordinate: { ...coordinate, source: 'b', video_id: 'b-id' },
+      }),
+    );
   });
 
   it('地址栏改为新源，保留搜索参数，去掉起播专用参数，不沿用旧路由状态', async () => {

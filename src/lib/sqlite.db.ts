@@ -130,6 +130,8 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
+import { TMDB_WATCH_PROGRESS_PAGE_SIZE } from './tmdb-watch-history';
+import { tmdbWatchProgressUpsert } from './tmdb-watch-progress-sql';
 import {
   buildShelvedPlayRecordWhere,
   buildTrackingSql,
@@ -158,6 +160,7 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
+  TmdbWatchProgress,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
@@ -727,6 +730,13 @@ export class LocalSqliteStorage implements IStorage {
           watch_ms INTEGER NOT NULL, PRIMARY KEY (username, session_id, bucket_start)
         );
         CREATE INDEX IF NOT EXISTS idx_watch_buckets_user_time ON playback_watch_buckets(username, bucket_start);
+        CREATE TABLE IF NOT EXISTS tmdb_watch_progress (
+          username TEXT NOT NULL, media_key TEXT NOT NULL, season INTEGER NOT NULL, episode INTEGER NOT NULL,
+          source TEXT NOT NULL, video_id TEXT NOT NULL, source_episode_index INTEGER NOT NULL,
+          position REAL NOT NULL, duration REAL NOT NULL, updated_at INTEGER NOT NULL,
+          PRIMARY KEY (username, media_key, season, episode)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tmdb_watch_progress_source ON tmdb_watch_progress(username, source, video_id, updated_at);
         CREATE TABLE IF NOT EXISTS watch_history (
           username TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, video_id TEXT NOT NULL,
           title TEXT NOT NULL, source_name TEXT NOT NULL, cover TEXT NOT NULL, year TEXT NOT NULL,
@@ -1733,6 +1743,25 @@ export class LocalSqliteStorage implements IStorage {
           .run(legacy);
         this.db
           .prepare(
+            `INSERT INTO tmdb_watch_progress (
+              username, media_key, season, episode, source, video_id,
+              source_episode_index, position, duration, updated_at
+            ) SELECT ?, media_key, season, episode, source, video_id,
+              source_episode_index, position, duration, updated_at
+              FROM tmdb_watch_progress WHERE username = ?
+            ON CONFLICT(username, media_key, season, episode) DO UPDATE SET
+              source = excluded.source, video_id = excluded.video_id,
+              source_episode_index = excluded.source_episode_index,
+              position = excluded.position, duration = excluded.duration,
+              updated_at = excluded.updated_at
+            WHERE excluded.updated_at > tmdb_watch_progress.updated_at`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM tmdb_watch_progress WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
             'UPDATE playback_sessions SET username = ? WHERE username = ?',
           )
           .run(canonical, legacy);
@@ -1795,6 +1824,7 @@ export class LocalSqliteStorage implements IStorage {
       'skip_configs',
       'playback_sessions',
       'watch_history',
+      'tmdb_watch_progress',
       'playback_watch_buckets',
       'user_message_state',
       'user_annual_recaps',
@@ -1971,9 +2001,18 @@ export class LocalSqliteStorage implements IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
+    tmdbProgress?: TmdbWatchProgress,
   ): Promise<void> {
     const username = normalizeUsername(userName);
-    this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
+    const save = () => {
+      this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
+      if (tmdbProgress) {
+        const write = tmdbWatchProgressUpsert('sqlite', username, tmdbProgress);
+        this.db.prepare(write.sql).run(...write.params);
+      }
+    };
+    if (tmdbProgress) this.db.transaction(save)();
+    else save();
   }
 
   async setPlayRecordIfUnchanged(
@@ -2160,6 +2199,57 @@ export class LocalSqliteStorage implements IStorage {
   async deleteAllPlayRecords(userName: string): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.deletePlayRecordsByUser.run(username);
+  }
+
+  async getTmdbWatchProgressByMediaKey(
+    userName: string,
+    mediaKey: string,
+    season: number,
+    afterEpisode = 0,
+  ): Promise<TmdbWatchProgress[]> {
+    return this.db
+      .prepare(
+        `SELECT media_key, season, episode, source, video_id, source_episode_index,
+          position, duration, updated_at
+         FROM tmdb_watch_progress
+         WHERE username = ? AND media_key = ? AND season = ? AND episode > ?
+         ORDER BY episode ASC LIMIT ?`,
+      )
+      .all(
+        normalizeUsername(userName),
+        mediaKey,
+        season,
+        afterEpisode,
+        TMDB_WATCH_PROGRESS_PAGE_SIZE + 1,
+      ) as TmdbWatchProgress[];
+  }
+
+  async getTmdbWatchProgressBySource(
+    userName: string,
+    source: string,
+    videoId: string,
+  ): Promise<TmdbWatchProgress[]> {
+    return this.db
+      .prepare(
+        `SELECT media_key, season, episode, source, video_id, source_episode_index,
+          position, duration, updated_at
+         FROM tmdb_watch_progress
+         WHERE username = ? AND source = ? AND video_id = ?
+         ORDER BY updated_at DESC, media_key ASC, season ASC, episode ASC LIMIT 1`,
+      )
+      .all(normalizeUsername(userName), source, videoId) as TmdbWatchProgress[];
+  }
+
+  async setTmdbWatchProgress(
+    userName: string,
+    progress: TmdbWatchProgress,
+  ): Promise<void> {
+    const write = tmdbWatchProgressUpsert(
+      'sqlite',
+      normalizeUsername(userName),
+      progress,
+    );
+    this.db.prepare(write.sql).run(...write.params);
   }
 
   async getFavoriteUpdateMessagePage(
@@ -3099,6 +3189,9 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.db
         .prepare('DELETE FROM watch_history WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM tmdb_watch_progress WHERE username = ?')
         .run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.db

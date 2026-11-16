@@ -93,6 +93,88 @@ describe('playIntent', () => {
     });
   });
 
+  it('TMDB 选集坐标随一次性意图消费，刷新不会重放', () => {
+    const tmdbCoordinate = {
+      media_key: 'tv/95842',
+      season: 2,
+      episode: 3,
+      source: 'source-a',
+      video_id: 'id-a',
+      source_episode_index: 15,
+    };
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 14,
+      resumeTime: 0,
+      tmdbCoordinate,
+    });
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 24,
+      }),
+    ).toEqual({
+      episodeIndex: 14,
+      resumeTime: 0,
+      resumeMode: null,
+      tmdbCoordinate,
+    });
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 24,
+      }),
+    ).toBeNull();
+  });
+
+  it('无效坐标或集被裁剪时只丢弃坐标，保留原播放意图', () => {
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 14,
+      resumeTime: 180,
+      tmdbCoordinate: {
+        media_key: 'tv/95842',
+        season: 2,
+        episode: 3,
+        source: 'source-a',
+        video_id: 'id-a',
+        source_episode_index: 15,
+      },
+    });
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 12,
+      }),
+    ).toEqual({ episodeIndex: 11, resumeTime: 180, resumeMode: 'forced' });
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 4,
+      resumeTime: 0,
+      tmdbCoordinate: {
+        media_key: 'tv/0',
+        season: 2,
+        episode: 3,
+        source: 'source-a',
+        video_id: 'id-a',
+        source_episode_index: 5,
+      },
+    });
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 12,
+      }),
+    ).toEqual({ episodeIndex: 4, resumeTime: 0, resumeMode: null });
+  });
+
   it('resumeTime 为 0 时仍会保留目标集意图', () => {
     savePlayIntent({
       source: 'source-a',

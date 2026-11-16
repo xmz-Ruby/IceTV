@@ -31,6 +31,21 @@ export interface PlayRecord {
   search_title?: string; // 搜索时使用的标题
 }
 
+export interface TmdbEpisodeCoordinate {
+  media_key: string;
+  season: number;
+  episode: number;
+  source: string;
+  video_id: string;
+  source_episode_index: number;
+}
+
+export interface TmdbWatchProgress extends TmdbEpisodeCoordinate {
+  position: number;
+  duration: number;
+  updated_at: number;
+}
+
 export interface PlayRecordPage {
   items: Record<string, PlayRecord>;
   total: number;
@@ -536,6 +551,7 @@ export interface IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
+    tmdbProgress?: TmdbWatchProgress,
   ): Promise<void>;
   setPlayRecordIfUnchanged(
     userName: string,
@@ -571,6 +587,21 @@ export interface IStorage {
   deletePlayRecord(userName: string, key: string): Promise<void>;
   deletePlayRecords(userName: string, keys: string[]): Promise<void>;
   deleteAllPlayRecords(userName: string): Promise<void>;
+  getTmdbWatchProgressByMediaKey(
+    userName: string,
+    mediaKey: string,
+    season: number,
+    afterEpisode?: number,
+  ): Promise<TmdbWatchProgress[]>;
+  getTmdbWatchProgressBySource(
+    userName: string,
+    source: string,
+    videoId: string,
+  ): Promise<TmdbWatchProgress[]>;
+  setTmdbWatchProgress(
+    userName: string,
+    progress: TmdbWatchProgress,
+  ): Promise<void>;
 
   // 收藏相关
   getFavoriteUpdateMessagePage(

@@ -17,7 +17,7 @@ import {
   readBlockAdEnabled,
   readEnableOptimization,
 } from '@/lib/local-preferences';
-import { SearchResult } from '@/lib/types';
+import { SearchResult, TmdbEpisodeCoordinate } from '@/lib/types';
 
 export interface SkipConfigState {
   enable: boolean;
@@ -132,6 +132,8 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     videoTitle,
     videoYear,
   ]);
+
+  const tmdbCoordinateRef = useRef<TmdbEpisodeCoordinate | null>(null);
 
   const [videoUrl, setVideoUrl] = useState('');
 
@@ -254,6 +256,7 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     videoYearRef,
     detailRef,
     currentEpisodeIndexRef,
+    tmdbCoordinateRef,
     videoUrl,
     setVideoUrl,
     resumeTimeRef,

@@ -14,6 +14,7 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
+import { assertTmdbWatchProgress } from '@/lib/__tests__/__fixtures__/tmdb-watch-progress-contract';
 import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 
@@ -101,6 +102,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       'access-reader',
     ]);
     expect(await storage.getUserAccess('access-reader')).toBeNull();
+  });
+
+  it('TMDB 坐标进度使用真实事务、二进制源身份和游标分页', async () => {
+    await assertTmdbWatchProgress(storage);
   });
 
   it('批量读取隔离用户并省略缺失键', async () => {

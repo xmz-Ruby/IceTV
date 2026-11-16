@@ -23,13 +23,14 @@ import {
   applyResumeTime,
   isWithinAutoResumeWindow,
 } from '@/features/play/lib/resumePlayback';
+import { resolveTmdbPlaybackCoordinate } from '@/features/tmdb/lib/playback-coordinate';
 import {
   generateStorageKey,
   getPlayRecordsByKeys,
-  PlayRecord,
   savePlayRecord,
 } from '@/lib/db.client';
 import { consumeMatchingPlayIntent } from '@/lib/play-intent';
+import type { PlayRecord, TmdbEpisodeCoordinate } from '@/lib/types';
 import { SearchResult } from '@/lib/types';
 
 export {
@@ -53,6 +54,7 @@ type PendingPlayProgressSave = {
   id: string;
   record: PlayRecord;
   fingerprint: string;
+  tmdbCoordinate?: TmdbEpisodeCoordinate;
 };
 
 export interface PlayProgressSaveState {
@@ -65,10 +67,18 @@ function buildPlayProgressFingerprint(
   source: string,
   id: string,
   record: PlayRecord,
+  tmdbCoordinate?: TmdbEpisodeCoordinate,
 ): string {
-  return [source, id, record.index, record.play_time, record.total_time].join(
-    '|',
-  );
+  return [
+    source,
+    id,
+    record.index,
+    record.play_time,
+    record.total_time,
+    tmdbCoordinate?.media_key,
+    tmdbCoordinate?.season,
+    tmdbCoordinate?.episode,
+  ].join('|');
 }
 
 async function flushPlayProgressSave(
@@ -80,7 +90,16 @@ async function flushPlayProgressSave(
   lastSaveTimeRef.current = Date.now();
 
   try {
-    await savePlayRecord(payload.source, payload.id, payload.record);
+    if (payload.tmdbCoordinate) {
+      await savePlayRecord(
+        payload.source,
+        payload.id,
+        payload.record,
+        payload.tmdbCoordinate,
+      );
+    } else {
+      await savePlayRecord(payload.source, payload.id, payload.record);
+    }
     saveStateRef.current.lastSavedFingerprint = payload.fingerprint;
   } finally {
     saveStateRef.current.inFlight = false;
@@ -109,6 +128,7 @@ export async function saveCurrentPlayProgress(
   saveStateRef: MutableRefObject<PlayProgressSaveState>,
   lastSaveTimeRef: MutableRefObject<number>,
   searchTitle: string,
+  tmdbCoordinateRef?: MutableRefObject<TmdbEpisodeCoordinate | null>,
 ) {
   if (
     !artPlayerRef.current ||
@@ -168,10 +188,18 @@ export async function saveCurrentPlayProgress(
     search_title: searchTitle,
   };
 
+  const coordinate = tmdbCoordinateRef?.current;
+  const tmdbCoordinate =
+    coordinate?.source === currentSourceRef.current &&
+    coordinate.video_id === currentIdRef.current &&
+    coordinate.source_episode_index === currentEpisodeIndexRef.current + 1
+      ? coordinate
+      : undefined;
   const fingerprint = buildPlayProgressFingerprint(
     currentSourceRef.current,
     currentIdRef.current,
     record,
+    tmdbCoordinate,
   );
 
   if (fingerprint === saveStateRef.current.lastSavedFingerprint) {
@@ -185,6 +213,7 @@ export async function saveCurrentPlayProgress(
         id: currentIdRef.current,
         record,
         fingerprint,
+        ...(tmdbCoordinate ? { tmdbCoordinate } : {}),
       };
       return;
     }
@@ -194,6 +223,7 @@ export async function saveCurrentPlayProgress(
       id: currentIdRef.current,
       record,
       fingerprint,
+      ...(tmdbCoordinate ? { tmdbCoordinate } : {}),
     });
   } catch (err) {
     console.error('保存播放进度失败:', err);
@@ -290,6 +320,7 @@ interface UsePlayProgressParams {
   saveIntervalRef: MutableRefObject<NodeJS.Timeout | null>;
   wakeLockRef: MutableRefObject<WakeLockSentinel | null>;
   historyRestoreGateRef: MutableRefObject<HistoryRestoreGate>;
+  tmdbCoordinateRef?: MutableRefObject<TmdbEpisodeCoordinate | null>;
   searchTitle: string;
   currentSource: string;
   currentId: string;
@@ -317,16 +348,22 @@ export function usePlayProgress({
   saveIntervalRef,
   wakeLockRef,
   historyRestoreGateRef,
+  tmdbCoordinateRef,
   searchTitle,
   currentSource,
   currentId,
+  currentEpisodeIndex,
   detail,
   setCurrentEpisodeIndex,
   onRestoreEpisodeChange,
   cleanupPlayer,
 }: UsePlayProgressParams) {
   const searchTitleRef = useRef(searchTitle);
+  const fallbackTmdbCoordinateRef = useRef<TmdbEpisodeCoordinate | null>(null);
+  const activeTmdbCoordinateRef =
+    tmdbCoordinateRef ?? fallbackTmdbCoordinateRef;
   const restoreAppliedKeyRef = useRef('');
+  const tmdbHintRef = useRef<TmdbEpisodeCoordinate | null>(null);
 
   useEffect(() => {
     searchTitleRef.current = searchTitle;
@@ -346,6 +383,7 @@ export function usePlayProgress({
         saveStateRef,
         lastSaveTimeRef,
         searchTitleRef.current,
+        activeTmdbCoordinateRef,
       ),
     [
       artPlayerRef,
@@ -358,6 +396,7 @@ export function usePlayProgress({
       saveStateRef,
       stableCurrentTimeRef,
       videoTitleRef,
+      activeTmdbCoordinateRef,
     ],
   );
 
@@ -493,6 +532,7 @@ export function usePlayProgress({
         episodeGroups: detailRef.current?.episode_groups,
       });
       if (playIntent) {
+        activeTmdbCoordinateRef.current = playIntent.tmdbCoordinate ?? null;
         applyRestoreState(playIntent);
         settleHistoryRestore(historyRestoreGate, restoreKey);
         return;
@@ -617,6 +657,7 @@ export function usePlayProgress({
     };
   }, [
     allowAutoResumeRef,
+    activeTmdbCoordinateRef,
     artPlayerRef,
     clearTargetEpisodeProgressRef,
     currentEpisodeIndexRef,
@@ -632,6 +673,43 @@ export function usePlayProgress({
     detail,
     setCurrentEpisodeIndex,
     stableCurrentTimeRef,
+  ]);
+
+  // 坐标定位在后台完成，不阻塞原有起播与历史恢复。
+  useEffect(() => {
+    if (!detail || detail.source !== currentSource || detail.id !== currentId)
+      return;
+    const controller = new AbortController();
+    const previous = activeTmdbCoordinateRef.current ?? tmdbHintRef.current;
+    const hint =
+      previous?.source === currentSource && previous.video_id === currentId
+        ? previous
+        : undefined;
+    tmdbHintRef.current = hint ?? null;
+    activeTmdbCoordinateRef.current = null;
+    void resolveTmdbPlaybackCoordinate(
+      detail,
+      currentEpisodeIndex,
+      hint,
+      controller.signal,
+    )
+      .then((coordinate) => {
+        if (!controller.signal.aborted) {
+          activeTmdbCoordinateRef.current = coordinate;
+          if (coordinate) tmdbHintRef.current = coordinate;
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          console.warn('定位 TMDB 观看坐标失败:', error);
+      });
+    return () => controller.abort();
+  }, [
+    activeTmdbCoordinateRef,
+    currentEpisodeIndex,
+    currentId,
+    currentSource,
+    detail,
   ]);
 
   // beforeunload / visibilitychange 事件处理

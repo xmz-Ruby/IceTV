@@ -1,5 +1,6 @@
 import { resolvePlayRecordEpisode } from '@/lib/episode-groups';
-import type { EpisodeGroup } from '@/lib/types';
+import { isValidTmdbEpisodeCoordinate } from '@/lib/tmdb-watch-history';
+import type { EpisodeGroup, TmdbEpisodeCoordinate } from '@/lib/types';
 
 export const PLAY_INTENT_KEY = 'icetv_play_intent';
 const PLAY_INTENT_TTL_MS = 5 * 60 * 1000;
@@ -14,6 +15,7 @@ interface PlayIntentPayload {
   groupLabel?: string;
   groupIndex?: number;
   groupTotal?: number;
+  tmdbCoordinate?: TmdbEpisodeCoordinate;
 }
 
 interface SavePlayIntentOptions {
@@ -24,6 +26,7 @@ interface SavePlayIntentOptions {
   groupLabel?: string;
   groupIndex?: number;
   groupTotal?: number;
+  tmdbCoordinate?: TmdbEpisodeCoordinate;
 }
 
 interface ConsumePlayIntentOptions {
@@ -37,6 +40,7 @@ interface PlayIntentRestoreState {
   episodeIndex: number;
   resumeTime: number;
   resumeMode: PlayIntentResumeMode;
+  tmdbCoordinate?: TmdbEpisodeCoordinate;
 }
 
 function isValidPlayIntentPayload(
@@ -89,6 +93,7 @@ export function savePlayIntent({
   groupLabel,
   groupIndex,
   groupTotal,
+  tmdbCoordinate,
 }: SavePlayIntentOptions): void {
   if (typeof window === 'undefined') return;
   if (!source || !id) return;
@@ -103,6 +108,7 @@ export function savePlayIntent({
     ...(groupLabel ? { groupLabel } : {}),
     ...(Number.isFinite(groupIndex) ? { groupIndex: Number(groupIndex) } : {}),
     ...(Number.isFinite(groupTotal) ? { groupTotal: Number(groupTotal) } : {}),
+    ...(tmdbCoordinate ? { tmdbCoordinate } : {}),
   };
 
   try {
@@ -145,6 +151,19 @@ export function consumeMatchingPlayIntent({
       resumeTime,
       resumeMode: resumeTime > 0 ? 'forced' : null,
     };
+    if (
+      isValidTmdbEpisodeCoordinate(payload.tmdbCoordinate) &&
+      payload.tmdbCoordinate.source === source &&
+      payload.tmdbCoordinate.video_id === id &&
+      payload.tmdbCoordinate.source_episode_index ===
+        payload.episodeIndex + 1 &&
+      restoreState.episodeIndex === payload.episodeIndex
+    ) {
+      restoreState.tmdbCoordinate = {
+        ...payload.tmdbCoordinate,
+        source_episode_index: restoreState.episodeIndex + 1,
+      };
+    }
 
     clearPlayIntentStorage();
     return restoreState;

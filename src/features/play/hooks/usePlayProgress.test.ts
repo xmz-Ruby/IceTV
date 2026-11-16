@@ -16,9 +16,18 @@ import {
 } from '@/features/play/hooks/usePlayProgress';
 import { PLAY_CHECKPOINT_KEY } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { resolveTmdbPlaybackCoordinate } from '@/features/tmdb/lib/playback-coordinate';
 import { getPlayRecordsByKeys, savePlayRecord } from '@/lib/db.client';
 import { savePlayIntent } from '@/lib/play-intent';
-import type { PlayRecord, SearchResult } from '@/lib/types';
+import type {
+  PlayRecord,
+  SearchResult,
+  TmdbEpisodeCoordinate,
+} from '@/lib/types';
+
+jest.mock('@/features/tmdb/lib/playback-coordinate', () => ({
+  resolveTmdbPlaybackCoordinate: jest.fn().mockResolvedValue(null),
+}));
 
 jest.mock('@/lib/db.client', () => ({
   deletePlayRecord: jest.fn(),
@@ -451,6 +460,44 @@ describe('usePlayProgress helpers', () => {
     expect(mockedSavePlayRecord).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])(
+    '仅当前源和当前集匹配的坐标随播放进度保存（匹配=%p）',
+    async (matching) => {
+      const coordinate = {
+        media_key: 'tv/95842',
+        season: 2,
+        episode: 3,
+        source: 'source-a',
+        video_id: 'id-a',
+        source_episode_index: matching ? 1 : 2,
+      };
+      await saveCurrentPlayProgress(
+        { current: { currentTime: 120, duration: 1500 } } as any,
+        { current: 'source-a' },
+        { current: 'id-a' },
+        { current: '番剧A' },
+        { current: detail },
+        { current: 0 },
+        { current: 120 },
+        { current: false },
+        {
+          current: {
+            inFlight: false,
+            pending: null,
+            lastSavedFingerprint: null,
+          },
+        },
+        { current: 0 },
+        '番剧A',
+        { current: coordinate },
+      );
+      const call = mockedSavePlayRecord.mock.calls[0];
+      expect(call[2]).toMatchObject({ index: 1, play_time: 120 });
+      if (matching) expect(call[3]).toEqual(coordinate);
+      else expect(call).toHaveLength(3);
+    },
+  );
+
   it('保存进度携带当前详情的作品状态', async () => {
     await saveCurrentPlayProgress(
       { current: { currentTime: 120, duration: 1500 } } as any,
@@ -576,24 +623,36 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
       saveIntervalRef: { current: null },
       wakeLockRef: { current: null },
       historyRestoreGateRef: { current: gate },
+      tmdbCoordinateRef: { current: null as TmdbEpisodeCoordinate | null },
     };
     const setCurrentEpisodeIndex = jest.fn();
     const onRestoreEpisodeChange = jest.fn();
     const cleanupPlayer = jest.fn();
     const view = renderHook(
-      ({ currentDetail }: { currentDetail: SearchResult }) =>
+      ({
+        currentDetail,
+        currentIndex = episodeIndex,
+      }: {
+        currentDetail: SearchResult;
+        currentIndex?: number;
+      }) =>
         usePlayProgress({
           ...refs,
           searchTitle: detail.title,
           currentSource: detail.source,
           currentId: detail.id,
-          currentEpisodeIndex: episodeIndex,
+          currentEpisodeIndex: currentIndex,
           detail: currentDetail,
           setCurrentEpisodeIndex,
           onRestoreEpisodeChange,
           cleanupPlayer,
         }),
-      { initialProps: { currentDetail: detail } },
+      {
+        initialProps: { currentDetail: detail } as {
+          currentDetail: SearchResult;
+          currentIndex?: number;
+        },
+      },
     );
     return { ...view, refs, setCurrentEpisodeIndex, onRestoreEpisodeChange };
   }
@@ -787,6 +846,43 @@ describe('usePlayProgress 历史恢复与起播握手', () => {
     resolveFirstRead({ [recordKey]: recordAtEpisode9 });
     await flushMicrotasks();
     expect(setCurrentEpisodeIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it('换集后丢弃上集迟到坐标，定位不阻塞起播握手', async () => {
+    const coordinate: TmdbEpisodeCoordinate = {
+      media_key: 'tv/95842',
+      season: 1,
+      episode: 1,
+      source: detail.source,
+      video_id: detail.id,
+      source_episode_index: 1,
+    };
+    let finishFirst!: (value: TmdbEpisodeCoordinate) => void;
+    jest
+      .mocked(resolveTmdbPlaybackCoordinate)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        ...coordinate,
+        episode: 2,
+        source_episode_index: 2,
+      });
+    const gate = createHistoryRestoreGate();
+    const { refs, rerender } = renderHistoryRestore(gate);
+    const released = trackRelease(gate);
+    await flushMicrotasks();
+    expect(released).toHaveBeenCalledTimes(1);
+    refs.currentEpisodeIndexRef.current = 1;
+    rerender({ currentDetail: detail, currentIndex: 1 });
+    await flushMicrotasks();
+    expect(refs.tmdbCoordinateRef.current?.episode).toBe(2);
+    finishFirst(coordinate);
+    await flushMicrotasks();
+    expect(refs.tmdbCoordinateRef.current?.episode).toBe(2);
   });
 
   it('没有信号时到上限才放行', async () => {

@@ -67,7 +67,7 @@ import {
   readSourcePlaybackStats,
   recordSourceManualSelection,
 } from '@/lib/source-playback-stats';
-import { SearchResult, SkipConfig } from '@/lib/types';
+import { SearchResult, SkipConfig, TmdbEpisodeCoordinate } from '@/lib/types';
 
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 
@@ -138,6 +138,7 @@ interface UseSourceSwitchOptions {
   pendingSourceSwitchCleanupRef: RefObject<SourceSwitchCleanupTask | null>;
   sourceChangeRequestIdRef: RefObject<number>;
   videoUrlRef: RefObject<string>;
+  tmdbCoordinateRef?: RefObject<TmdbEpisodeCoordinate | null>;
 
   setError: Dispatch<SetStateAction<string | null>>;
   setVideoUrl: Dispatch<SetStateAction<string>>;
@@ -161,10 +162,7 @@ interface UseSourceSwitchOptions {
   // 自动换源的三个触发点都会调用，调用方负责只在本次加载尚未起播时计入失败
   onPlaybackStartFailed?: () => void;
   // 源内线路自动轮换用：跨源换源之前先切本源其他含当前集的线路
-  handlePlaybackLineChange: (
-    key: string,
-    options?: { auto?: boolean },
-  ) => void;
+  handlePlaybackLineChange: (key: string, options?: { auto?: boolean }) => void;
 }
 
 export function useSourceSwitch(options: UseSourceSwitchOptions) {
@@ -187,6 +185,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
     videoUrlRef,
+    tmdbCoordinateRef,
     setError,
     setVideoUrl,
     setVideoTitle,
@@ -577,11 +576,27 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           clearTargetEpisodeProgress,
         });
 
+        const previousCoordinate = tmdbCoordinateRef?.current;
+        const nextCoordinate =
+          preserveProgress &&
+          previousCoordinate?.source === previousSource &&
+          previousCoordinate.video_id === previousId &&
+          previousCoordinate.source_episode_index === latestEpisodeIndex + 1
+            ? {
+                ...previousCoordinate,
+                source: newDetail.source,
+                video_id: newDetail.id,
+                source_episode_index: targetIndex + 1,
+              }
+            : undefined;
+        if (tmdbCoordinateRef)
+          tmdbCoordinateRef.current = nextCoordinate ?? null;
         savePlayIntent({
           source: newDetail.source,
           id: newDetail.id,
           episodeIndex: targetIndex,
           resumeTime: nextResumeState.resumeTime,
+          ...(nextCoordinate ? { tmdbCoordinate: nextCoordinate } : {}),
         });
 
         resumeTimeRef.current = nextResumeState.resumeTime;
@@ -706,6 +721,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       cancelEpisodeResolve,
       availableSources,
       currentEpisodeIndex,
+      tmdbCoordinateRef,
       artPlayerRef,
       currentSourceRef,
       currentIdRef,

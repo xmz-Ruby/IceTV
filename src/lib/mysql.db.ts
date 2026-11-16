@@ -131,6 +131,8 @@ import {
   normalizePlaybackSearchKeyword,
 } from './playback-query';
 import { getMySqlConnectionUrl } from './storage-type';
+import { TMDB_WATCH_PROGRESS_PAGE_SIZE } from './tmdb-watch-history';
+import { tmdbWatchProgressUpsert } from './tmdb-watch-progress-sql';
 import {
   buildShelvedPlayRecordWhere,
   buildTrackingSql,
@@ -159,6 +161,7 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
+  TmdbWatchProgress,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
@@ -845,6 +848,17 @@ export class MySqlStorage implements IStorage {
       watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
       KEY idx_watch_buckets_user_time(username, bucket_start)
     ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS tmdb_watch_progress (
+      username VARCHAR(191) NOT NULL,
+      media_key VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
+      season INT NOT NULL, episode INT NOT NULL,
+      source VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
+      video_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
+      source_episode_index INT NOT NULL,
+      position DOUBLE NOT NULL, duration DOUBLE NOT NULL, updated_at BIGINT NOT NULL,
+      PRIMARY KEY(username, media_key, season, episode),
+      KEY idx_tmdb_watch_progress_source(username, source, video_id, updated_at)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
     await this.pool.execute(`CREATE TABLE IF NOT EXISTS watch_history (
       username VARCHAR(191) NOT NULL, id VARCHAR(80) NOT NULL, source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL,
       title VARCHAR(255) NOT NULL, source_name VARCHAR(255) NOT NULL, cover TEXT NOT NULL, year VARCHAR(32) NOT NULL,
@@ -1064,15 +1078,24 @@ export class MySqlStorage implements IStorage {
     userName: string,
     key: string,
     record: PlayRecord,
+    tmdbProgress?: TmdbWatchProgress,
   ): Promise<void> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
-    await this.pool.execute(
-      `INSERT INTO play_records (username, record_key, record_json)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE record_json = VALUES(record_json)`,
-      [username, key, JSON.stringify(record)],
-    );
+    const save = async (executor: Pick<PoolConnection, 'execute'>) => {
+      await executor.execute(
+        `INSERT INTO play_records (username, record_key, record_json)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE record_json = VALUES(record_json)`,
+        [username, key, JSON.stringify(record)],
+      );
+      if (tmdbProgress) {
+        const write = tmdbWatchProgressUpsert('mysql', username, tmdbProgress);
+        await executor.execute(write.sql, write.params);
+      }
+    };
+    if (tmdbProgress) await this.withTransaction(save);
+    else await save(this.pool);
   }
 
   async setPlayRecordIfUnchanged(
@@ -1296,6 +1319,76 @@ export class MySqlStorage implements IStorage {
     await this.pool.execute('DELETE FROM play_records WHERE username = ?', [
       username,
     ]);
+  }
+
+  async getTmdbWatchProgressByMediaKey(
+    userName: string,
+    mediaKey: string,
+    season: number,
+    afterEpisode = 0,
+  ): Promise<TmdbWatchProgress[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT media_key, season, episode, source, video_id, source_episode_index,
+        position, duration, updated_at
+       FROM tmdb_watch_progress
+       WHERE username = ? AND media_key = ? AND season = ? AND episode > ?
+       ORDER BY episode ASC LIMIT ?`,
+      [
+        normalizeUsername(userName),
+        mediaKey,
+        season,
+        afterEpisode,
+        TMDB_WATCH_PROGRESS_PAGE_SIZE + 1,
+      ],
+    );
+    return rows.map((row) => ({
+      ...row,
+      season: Number(row.season),
+      episode: Number(row.episode),
+      source_episode_index: Number(row.source_episode_index),
+      position: Number(row.position),
+      duration: Number(row.duration),
+      updated_at: Number(row.updated_at),
+    })) as TmdbWatchProgress[];
+  }
+
+  async getTmdbWatchProgressBySource(
+    userName: string,
+    source: string,
+    videoId: string,
+  ): Promise<TmdbWatchProgress[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT media_key, season, episode, source, video_id, source_episode_index,
+        position, duration, updated_at
+       FROM tmdb_watch_progress
+       WHERE username = ? AND source = ? AND video_id = ?
+       ORDER BY updated_at DESC, media_key ASC, season ASC, episode ASC LIMIT 1`,
+      [normalizeUsername(userName), source, videoId],
+    );
+    return rows.map((row) => ({
+      ...row,
+      season: Number(row.season),
+      episode: Number(row.episode),
+      source_episode_index: Number(row.source_episode_index),
+      position: Number(row.position),
+      duration: Number(row.duration),
+      updated_at: Number(row.updated_at),
+    })) as TmdbWatchProgress[];
+  }
+
+  async setTmdbWatchProgress(
+    userName: string,
+    progress: TmdbWatchProgress,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const write = tmdbWatchProgressUpsert(
+      'mysql',
+      normalizeUsername(userName),
+      progress,
+    );
+    await this.pool.execute(write.sql, write.params);
   }
 
   async getFavoriteUpdateMessagePage(
@@ -2437,6 +2530,10 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM watch_history WHERE username = ?', [
         username,
       ]);
+      await connection.execute(
+        'DELETE FROM tmdb_watch_progress WHERE username = ?',
+        [username],
+      );
       await connection.execute(
         'DELETE FROM playback_watch_buckets WHERE username = ?',
         [username],

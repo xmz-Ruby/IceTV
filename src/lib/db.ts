@@ -22,6 +22,7 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
+  TmdbWatchProgress,
   UserMessageState,
   VideoReview,
   WorkReviewSummary,
@@ -376,10 +377,23 @@ class DbManager {
     source: string,
     id: string,
     record: PlayRecord,
+    tmdbProgress?: TmdbWatchProgress,
   ): Promise<void> {
     const key = generateStorageKey(source, id);
     const storage = await this.getStorage();
-    await storage.setPlayRecord(userName, key, record);
+    await storage.setPlayRecord(userName, key, record, tmdbProgress);
+  }
+
+  async getTmdbWatchProgressByMediaKey(
+    ...args: Parameters<IStorage['getTmdbWatchProgressByMediaKey']>
+  ): ReturnType<IStorage['getTmdbWatchProgressByMediaKey']> {
+    return (await this.getStorage()).getTmdbWatchProgressByMediaKey(...args);
+  }
+
+  async getTmdbWatchProgressBySource(
+    ...args: Parameters<IStorage['getTmdbWatchProgressBySource']>
+  ): ReturnType<IStorage['getTmdbWatchProgressBySource']> {
+    return (await this.getStorage()).getTmdbWatchProgressBySource(...args);
   }
 
   async savePlayRecordIfUnchanged(

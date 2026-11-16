@@ -343,6 +343,60 @@ describe('playrecords route', () => {
     expect(mockDeleteAllPlayRecords).not.toHaveBeenCalled();
   });
 
+  it('坐标与源、集一致时随原记录原子双写，保留源记录原结构', async () => {
+    const tmdbCoordinate = {
+      media_key: 'tv/95842',
+      season: 2,
+      episode: 3,
+      source: 'source',
+      video_id: 'new',
+      source_episode_index: 1,
+    };
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: records['source+new'],
+        tmdbCoordinate,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const [, , , savedRecord, savedCoordinate] =
+      mockSavePlayRecord.mock.calls[0];
+    expect(savedRecord).not.toHaveProperty('tmdbCoordinate');
+    expect(savedCoordinate).toEqual({
+      ...tmdbCoordinate,
+      position: 1,
+      duration: 10,
+      updated_at: 300,
+    });
+  });
+
+  it.each([
+    null,
+    { media_key: 'tv/0', season: 1, episode: 1 },
+    { media_key: 'movie/123', season: 1, episode: 1 },
+    { media_key: 'tv/123', season: 1.5, episode: 1 },
+    { media_key: 'tv/123', season: 1, episode: 0 },
+    { media_key: 'tv/123', season: 1, episode: 1, source: 'other' },
+    { media_key: 'tv/123', season: 1, episode: 1, source_episode_index: 2 },
+  ])('拒绝无效或与本次播放不符的坐标 %p', async (changes) => {
+    const tmdbCoordinate = changes && {
+      source: 'source',
+      video_id: 'new',
+      source_episode_index: 1,
+      ...changes,
+    };
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: records['source+new'],
+        tmdbCoordinate,
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockSavePlayRecord).not.toHaveBeenCalled();
+  });
+
   it('保存播放进度时由服务端记录元数据检查时间', async () => {
     const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1234);
 
