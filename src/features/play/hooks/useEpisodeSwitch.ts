@@ -44,7 +44,10 @@ interface EpisodeSwitchHandlers {
   handleEpisodeChange: (episodeNumber: number) => void;
   handlePreviousEpisode: () => void;
   handleNextEpisode: () => void;
-  handlePlaybackLineChange: (key: string) => void;
+  handlePlaybackLineChange: (
+    key: string,
+    options?: { auto?: boolean },
+  ) => void;
 }
 
 export function useEpisodeSwitch({
@@ -169,7 +172,7 @@ export function useEpisodeSwitch({
   }, [switchEpisode, currentEpisodeIndexRef]);
 
   const handlePlaybackLineChange = useCallback(
-    (key: string) => {
+    (key: string, options?: { auto?: boolean }) => {
       const detail = detailRef.current;
       if (!detail || detail.playback_line === key) return;
       const target = resolvePlaybackLineSwitch(
@@ -180,6 +183,12 @@ export function useEpisodeSwitch({
       if (!target) {
         showToast('该线路缺少当前剧集，已保留当前播放', 'notice');
         return;
+      }
+      if (options?.auto) {
+        const label =
+          detail.playback_lines?.find((line) => line.key === key)?.label ||
+          key;
+        showToast(`当前线路播放失败，已切换线路「${label}」`, 'notice');
       }
       switchEpisode(target.episodeIndex, target.detail);
     },

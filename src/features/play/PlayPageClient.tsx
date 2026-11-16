@@ -500,6 +500,7 @@ function AuthenticatedPlayPageClient({
     setSourceSearchError,
     cleanupPlayer,
     onPlaybackStartFailed: handlePlaybackStartFailed,
+    handlePlaybackLineChange,
   });
 
   const resetAutoSourceSwitch = useCallback(() => {

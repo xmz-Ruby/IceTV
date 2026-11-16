@@ -56,6 +56,10 @@ import {
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
+import {
+  buildSubjectPageUrl,
+  isTmdbSubjectEntryEnabled,
+} from '@/lib/subject-navigation';
 import { showToast } from '@/lib/toast';
 import { parseStorageKey } from '@/lib/utils';
 import {
@@ -430,6 +434,16 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         )}&id=${actualId.replace('live_', '')}`;
       }
       if (playsByTitle) {
+        // TMDB 开启时豆瓣/目录收藏卡片先进详情页选季选集（「继续观看」由详情页提供）
+        if (isTmdbSubjectEntryEnabled()) {
+          return buildSubjectPageUrl({
+            title: actualTitle,
+            year: actualYear,
+            type: actualSearchType,
+            doubanId: actualDoubanId,
+            poster: actualPoster,
+          });
+        }
         const localTarget = findLocalPlaybackTargetByTitle(
           actualTitle,
           actualYear,
@@ -477,6 +491,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualId,
       actualTitle,
       actualYear,
+      actualDoubanId,
+      actualPoster,
       isAggregate,
       isSingleAggregate,
       isDirectStartup,

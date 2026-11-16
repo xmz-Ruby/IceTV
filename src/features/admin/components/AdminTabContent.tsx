@@ -50,6 +50,13 @@ const UserConfig = dynamic(
     ),
   { loading: () => <AdminContentSkeleton /> },
 );
+const TmdbConfig = dynamic(
+  () =>
+    import('@/features/admin/components/tabs/TmdbConfigTab').then(
+      (mod) => mod.default,
+    ),
+  { loading: () => <AdminContentSkeleton /> },
+);
 const AnnouncementsTab = dynamic(
   () => import('@/features/admin/components/tabs/AnnouncementsTab'),
   { loading: () => <AdminContentSkeleton /> },
@@ -129,6 +136,8 @@ const AdminTabBody = ({
       );
     case 'announcements':
       return <AnnouncementsTab config={config} refreshConfig={refreshConfig} />;
+    case 'tmdb':
+      return <TmdbConfig config={config} refreshConfig={refreshConfig} />;
     case 'user':
       return (
         <UserConfig config={config} role={role} refreshConfig={refreshConfig} />

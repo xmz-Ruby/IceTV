@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
     AutoSwitchSource: publicConfig.AutoSwitchSource,
     EnableDanmaku: publicConfig.EnableDanmaku,
     EnableUserDanmaku: publicConfig.EnableUserDanmaku,
+    TmdbEnabled: publicConfig.TmdbEnabled,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,

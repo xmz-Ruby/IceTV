@@ -29,6 +29,12 @@ import {
   DEFAULT_SOURCE_COVER_PROXY_MODE,
   normalizeSourceCoverProxyMode,
 } from '@/lib/source-cover-proxy';
+import {
+  DEFAULT_TMDB_API_HOST,
+  DEFAULT_TMDB_IMAGE_HOST,
+  isTmdbSettingsEnabled,
+  normalizeTmdbSettings,
+} from '@/lib/tmdb-settings';
 import type { UserAccess } from '@/lib/user-access';
 import { normalizeUsername } from '@/lib/username';
 import { AdminConfig } from '@/types/admin';
@@ -305,6 +311,12 @@ async function getInitConfig(
     SourceConfig: [],
     CustomCategories: [],
     LiveConfig: [],
+    TmdbConfig: normalizeTmdbSettings({
+      Enabled: process.env.TMDB_ENABLED === 'true',
+      ApiHost: process.env.TMDB_API_HOST || DEFAULT_TMDB_API_HOST,
+      ApiKey: process.env.TMDB_API_KEY || '',
+      ImageHost: process.env.TMDB_IMAGE_HOST || DEFAULT_TMDB_IMAGE_HOST,
+    }),
   };
 
   // 从配置文件中补充源信息
@@ -502,6 +514,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (!adminConfig.LiveConfig || !Array.isArray(adminConfig.LiveConfig)) {
     adminConfig.LiveConfig = [];
   }
+  adminConfig.TmdbConfig = normalizeTmdbSettings(adminConfig.TmdbConfig);
   adminConfig.TrafficConfig = normalizeTrafficSettings(
     adminConfig.TrafficConfig,
   );
@@ -832,5 +845,6 @@ export async function getPublicConfig() {
       query: category.query,
     })),
     FluidSearch: config.SiteConfig.FluidSearch,
+    TmdbEnabled: isTmdbSettingsEnabled(config.TmdbConfig),
   };
 }

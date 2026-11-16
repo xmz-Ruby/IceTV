@@ -13,6 +13,10 @@ import {
   withReturnTo,
 } from '@/lib/navigation-return';
 import {
+  buildSubjectPageUrl,
+  isTmdbSubjectEntryEnabled,
+} from '@/lib/subject-navigation';
+import {
   canUseHoverPrefetch,
   canUseNetworkPrefetch,
   findLocalPlaybackTargetByTitle,
@@ -25,10 +29,18 @@ interface PosterPlayTarget {
   title: string;
   year?: string;
   type?: string;
+  doubanId?: number | string;
+  poster?: string;
 }
 
 // 按标题起播的海报类入口（豆瓣/Bangumi 卡片、首页精选）共用的跳转与预热
-export function usePosterPlay({ title, year, type = '' }: PosterPlayTarget) {
+export function usePosterPlay({
+  title,
+  year,
+  type = '',
+  doubanId,
+  poster,
+}: PosterPlayTarget) {
   const router = useRouter();
   const prefetchTimerRef = useRef<number | null>(null);
 
@@ -59,6 +71,18 @@ export function usePosterPlay({ title, year, type = '' }: PosterPlayTarget) {
   }, [title, year]);
 
   const play = useCallback(() => {
+    // TMDB 开启时先进详情页选季选集（本地观看记录的「继续观看」由详情页提供），
+    // 弹幕/搜索预热留给旧链路——详情页的源匹配面板会用自己的检索词
+    if (isTmdbSubjectEntryEnabled()) {
+      router.push(
+        withReturnTo(
+          buildSubjectPageUrl({ title, year, type, doubanId, poster }),
+          getCurrentNavigationPath(),
+        ),
+      );
+      return;
+    }
+
     const playUrl = withReturnTo(buildPlayUrl(), getCurrentNavigationPath());
     const authInfo = getAuthInfoFromBrowserCookie();
     if (authInfo?.username) {
@@ -72,12 +96,25 @@ export function usePosterPlay({ title, year, type = '' }: PosterPlayTarget) {
       }
     }
     router.push(playUrl);
-  }, [buildPlayUrl, router, title, warmupDanmaku, year]);
+  }, [
+    buildPlayUrl,
+    doubanId,
+    poster,
+    router,
+    title,
+    type,
+    warmupDanmaku,
+    year,
+  ]);
 
   // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由
   const prefetch = useCallback(() => {
     if (!canUseHoverPrefetch()) return;
 
+    if (isTmdbSubjectEntryEnabled()) {
+      router.prefetch('/subject');
+      return;
+    }
     router.prefetch('/play');
     if (prefetchTimerRef.current) {
       window.clearTimeout(prefetchTimerRef.current);

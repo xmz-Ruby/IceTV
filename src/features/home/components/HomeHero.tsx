@@ -120,6 +120,8 @@ function HeroActions({ item }: { item: HomeHeroItem }) {
     title: item.title,
     year: item.year,
     type: item.type,
+    doubanId: item.id,
+    poster: item.poster,
   });
   const openWatchRecord = useOpenWatchRecord();
   const externalUrl = buildExternalSubjectUrl(Number(item.id));
@@ -388,6 +390,8 @@ function MobileHeroSlide({
     title: item.title,
     year: item.year,
     type: item.type,
+    doubanId: item.id,
+    poster: item.poster,
   });
   const openWatchRecord = useOpenWatchRecord();
 

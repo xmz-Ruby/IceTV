@@ -97,6 +97,24 @@ function createLazySource(
   };
 }
 
+// 双线路源：当前在线路 A，线路 B 同集数可承接线路轮换
+function createMultiLineSource(source: string): SearchResult {
+  const base = createSource(source, THREE_EPISODES);
+  const lineA = {
+    key: '线路A:0',
+    label: '线路A',
+    episodes: base.episodes,
+    episodes_titles: base.episodes_titles,
+  };
+  const lineB = {
+    key: '线路B:0',
+    label: '线路B',
+    episodes: base.episodes.map((_, index) => `https://${source}-b.example/${index}.m3u8`),
+    episodes_titles: base.episodes_titles,
+  };
+  return { ...base, playback_lines: [lineA, lineB], playback_line: lineA.key };
+}
+
 // 第一个为当前源，其余为需要先等详情的懒解析候选
 function createWaitingSources(keys: string[]): SearchResult[] {
   return keys.map((key, index) =>
@@ -204,6 +222,7 @@ function setupHook({
     setSourceSearchError: jest.fn(),
     cleanupPlayer: jest.fn(),
     onPlaybackStartFailed: jest.fn(),
+    handlePlaybackLineChange: jest.fn(),
   };
 
   const { result } = renderHook(() => useSourceSwitch(options));
@@ -282,6 +301,46 @@ describe('useSourceSwitch 自动换源', () => {
     expect(global.fetch).not.toHaveBeenCalled();
     // 未开启自动换源也要把三处触发点报给起播统计
     expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(3);
+  });
+
+  it('多线路源播放失败先轮换本源线路，不依赖自动换源开关', () => {
+    const { result, options } = setupHook({
+      availableSources: [createMultiLineSource('a'), createSource('b', THREE_EPISODES)],
+    });
+
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    expect(options.handlePlaybackLineChange).toHaveBeenCalledWith('线路B:0', {
+      auto: true,
+    });
+    // 线路轮换不算跨源换源：未发详情请求、未切源、不占换源额度
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(options.setCurrentSource).not.toHaveBeenCalled();
+    expect(result.current.playbackIntentRef.current.attempts).toBe(0);
+  });
+
+  it('本源线路轮换用尽后才落到跨源换源', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: [createMultiLineSource('a'), createSource('b', THREE_EPISODES)],
+    });
+
+    // 第一次失败：切到线路 B
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    expect(options.handlePlaybackLineChange).toHaveBeenCalledWith('线路B:0', {
+      auto: true,
+    });
+    // 模拟线路 B 也失败：已试线路集合保留，无第三个线路 → 落到跨源换源
+    const detailRef = options.detailRef as { current: SearchResult | null };
+    detailRef.current = {
+      ...detailRef.current!,
+      playback_line: '线路B:0',
+    };
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    expect(options.handlePlaybackLineChange).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(options.setCurrentSource).toHaveBeenCalledWith('b'),
+    );
+    expect(result.current.playbackIntentRef.current.attempts).toBe(1);
   });
 
   it('离线起播超时显示可重试状态而不消耗线路和源健康', () => {

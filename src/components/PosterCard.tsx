@@ -75,7 +75,7 @@ function PosterCard({
     play: handlePlay,
     prefetch: handlePrefetch,
     cancelPrefetch,
-  } = usePosterPlay({ title, year, type });
+  } = usePosterPlay({ title, year, type, doubanId, poster });
 
   // 桌面端点击即播放，右键在光标处展开菜单；触屏长按展开底部面板
   const openActionSheet = useCallback(

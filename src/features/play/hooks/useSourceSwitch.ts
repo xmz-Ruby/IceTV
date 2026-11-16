@@ -32,6 +32,7 @@ import {
   resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
+import { pickPlaybackLineFailoverTarget } from '@/features/play/lib/playbackLineFailover';
 import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import { holdBackgroundSourceProbes } from '@/features/play/lib/sourceProbeStore';
@@ -159,6 +160,11 @@ interface UseSourceSwitchOptions {
   cleanupPlayer: () => void;
   // 自动换源的三个触发点都会调用，调用方负责只在本次加载尚未起播时计入失败
   onPlaybackStartFailed?: () => void;
+  // 源内线路自动轮换用：跨源换源之前先切本源其他含当前集的线路
+  handlePlaybackLineChange: (
+    key: string,
+    options?: { auto?: boolean },
+  ) => void;
 }
 
 export function useSourceSwitch(options: UseSourceSwitchOptions) {
@@ -200,9 +206,14 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     setSourceSearchError,
     cleanupPlayer,
     onPlaybackStartFailed,
+    handlePlaybackLineChange,
   } = options;
 
   const autoSwitchFailedKeysRef = useRef<Set<string>>(new Set());
+  // 源内线路轮换的已试线路：按 source:id:episodeIndex 作用域，跨线路切换保留
+  //（否则两条坏线路来回横跳），换集/换源后作用域变化自动清空
+  const lineFailoverScopeRef = useRef('');
+  const lineFailoverTriedKeysRef = useRef<Set<string>>(new Set());
   const playbackIntentRef = useRef(createVodPlaybackIntent());
   const tryAutoSwitchSourceRef = useRef<(reason: string) => boolean>(
     () => false,
@@ -742,6 +753,43 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       )
         return false;
       if (sourceSwitchInFlightRef.current) return true;
+
+      // 源内线路轮换先于跨源换源（对齐手机端 checkFlag→nextFlag 一环）：
+      // 同源同内容、无换错片风险，不受「播放失败自动换源」本地开关约束；
+      // 已试线路按 source:id:episodeIndex 作用域累积，全部线路用尽才落到跨源换源。
+      const activeDetail = detailRef.current;
+      if (activeDetail?.playback_lines?.length) {
+        const failoverEpisodeIndex = Math.max(
+          currentEpisodeIndex,
+          currentEpisodeIndexRef.current,
+        );
+        const failoverScope = `${activeDetail.source}:${activeDetail.id}:${failoverEpisodeIndex}`;
+        if (lineFailoverScopeRef.current !== failoverScope) {
+          lineFailoverScopeRef.current = failoverScope;
+          lineFailoverTriedKeysRef.current = new Set();
+        }
+        if (activeDetail.playback_line) {
+          lineFailoverTriedKeysRef.current.add(activeDetail.playback_line);
+        }
+        const failoverTarget = pickPlaybackLineFailoverTarget(
+          activeDetail,
+          failoverEpisodeIndex,
+          lineFailoverTriedKeysRef.current,
+        );
+        if (failoverTarget) {
+          lineFailoverTriedKeysRef.current.add(failoverTarget.key);
+          console.warn('当前线路播放失败，自动切换本源线路', {
+            from: activeDetail.playback_line,
+            to: failoverTarget.key,
+            reason,
+          });
+          // 只取消旧线路可能仍在途的逐集解析；跨源换源额度（attempts/failedKeys）跨线路保留
+          cancelEpisodeResolve?.();
+          handlePlaybackLineChange(failoverTarget.key, { auto: true });
+          return true;
+        }
+      }
+
       if (!readAutoSwitchSource()) return false;
       const curSource = currentSourceRef.current;
       const curId = currentIdRef.current;
@@ -801,6 +849,8 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       currentEpisodeIndexRef,
       sourceSwitchEpisodeAnchorRef,
       handleSourceChange,
+      handlePlaybackLineChange,
+      cancelEpisodeResolve,
     ],
   );
 

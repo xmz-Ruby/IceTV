@@ -11,6 +11,7 @@
 | 画质     | `vodHlsQualityController.ts`、`vodQualityPolicy.ts`                                                                              |
 | 前向缓冲 | `vodBufferBudgetPolicy.ts`、`vodBufferBudgetController.ts`                                                                       |
 | 换源     | `src/features/play/hooks/useSourceSwitch.ts`                                                                                     |
+| 线路轮换 | `src/features/play/lib/playbackLineFailover.ts`（候选挑选在 `playbackLines.ts` 之上，触发点见「容错与换源」）                    |
 | 快捷键   | 定义 `src/lib/player-shortcuts.ts` → 执行 `src/hooks/usePlayerKeyboard.ts` → 弹窗 `src/components/PlayerShortcutsModal.tsx`      |
 
 新增快捷键动作依次补齐三处，不要在页面单独监听 keydown。
@@ -48,7 +49,8 @@
 - 停止当前源用 `runManagedVideoCleanup()`。只调 `stopLoad()` 会被待执行的恢复重试或后续 `play` 事件重新拉流。
 - 分片加载成功是否算恢复以 `handleFragmentLoaded()` 的返回值为准（同类型分片到达失败位置才算），直连与服务端的线路失败计数也随它清零。恢复拉流会先重下失败位置之前的分片，这些请求常命中浏览器缓存，**任意分片成功就清零会让坏流永远凑不满上限**。
 - `hls.startLoad()` 会中止在途分片并重新请求，不是幂等的「确保在加载」。起播和 play 只在 `hls.loadingEnabled` 为 false 时补拉，卡顿恢复在有分片在途或缓冲仍在增长时不介入，**否则首片会被中止后整段重下**。
-- 自动换源是用户本地开关，站点默认值 `SiteConfig.AutoSwitchSource`（默认关）。触发集中在 `useSourceSwitch.ts`：页面超时、恢复次数耗尽、懒解析失败，共用离线和意图身份守卫；网络加载失败先尝试当前源尚未使用的另一线路。换集、重试等新播放意图先调 `resetAutoSourceSwitch()`，同步递增请求代次并中止候选详情请求，详情正文解析后再次核对身份再提交；这样旧候选即使忽略中止信号也无法覆盖新集。
+- 自动换源是用户本地开关，站点默认值 `SiteConfig.AutoSwitchSource`（默认关）。触发集中在 `useSourceSwitch.ts`：页面超时、恢复次数耗尽、懒解析失败，共用离线和意图身份守卫；网络加载失败先尝试当前源尚未使用的另一传输线路。换集、重试等新播放意图先调 `resetAutoSourceSwitch()`，同步递增请求代次并中止候选详情请求，详情正文解析后再次核对身份再提交；这样旧候选即使忽略中止信号也无法覆盖新集。
+- **CMS 播放线路（`playback_lines`）自动轮换**插在 `tryAutoSwitchSource()` 内、跨源换源之前（完整次序：降画质 → 直连/代理传输线路 → 致命恢复 → CMS 线路轮换 → 跨源换源）。候选挑选在 `playbackLineFailover.ts`：只选「含当前集」的未试线路（复用 `resolvePlaybackLineSwitch` 语义）。已试线路按 `source:id:episodeIndex` 作用域存 ref，**跨线路切换保留**（否则两条坏线路来回横跳）、换集/换源自动换域清空；轮换始终启用、不受自动换源开关约束、不占跨源换源名额（`attempts`/`failedKeys` 跨线路保留），切换前只 `cancelEpisodeResolve()` 取消在途逐集解析。
 - 换源时候选自带的剧集能按集身份确认目标集（`preserveProgress`），且目标集不是懒解析地址，就直接提交起播，`/api/detail` 改为提交后后台刷新。普通源的搜索结果与详情走同一 `vod_play_url` 解析，服务端缓存期也相近，所以可以先信任候选；懒解析源的搜索结果与详情剧集结构可能不同，仍先阻塞等详情（最多 W）。后台刷新沿用同一个中止控制器与请求代次，新播放意图会中止它；只有当前集仍存在于新详情时才提交，并经 `remapEpisodeIndexToDetail()` 换算索引。**新详情缺当前集时保留已提交的候选**，交给播放失败路径处理，不在起播中途跳集。
 - 旧源的迟到回调（超时、错误、起播、统计）先确认运行时仍属于当前加载（`getVodRuntimeSourceUrl()` / `pauseIfVodRuntimeReleased()`），换源流程内再看 `sourceSwitchInFlightRef`。漏判时旧源失败会触发回退或换源、覆盖用户刚选的源，旧集进度也会带进新集。
 - 换源提交后经 `replacePlayPageUrl()` 以 `window.history.replaceState(null, …)` 把地址改成新源，Next 据此同步路由地址与 `useSearchParams()`。state 必须传 `null`：沿用 `window.history.state` 时路由不同步，之后任一路由更新（刷新、开发热更新）会把地址栏改回换源前的源。页面状态和 `usePlayInit` 只在挂载时读一次地址参数，**不要让它们随 searchParams 变化重跑**，否则每次换源都重新搜索起播；`tab=reviews` 这类一次性入口参数由消费方打开对应面板后立即从地址移除，否则换源同步地址时参数串变化会再次触发；不要在 `replacePlayPageUrl()` 里删，起播时它可能早于消费方挂载。也不要用 `router.replace`，同路由软导航会重新请求服务端组件。

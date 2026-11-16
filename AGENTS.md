@@ -10,6 +10,7 @@
 | 评价、收藏库、观看状态、个人主页、关注、卡片菜单 | [评价与收藏](docs/reviews-favorites.md)  |
 | 消息、追更、关注动态                             | [消息与追更](docs/messages-tracking.md)  |
 | 搜索、源站接入、源站健康与探测、逐集解析         | [源站与搜索](docs/sources-search.md)     |
+| TMDB、/subject 详情页、豆瓣匹配与选集定位       | [TMDB](docs/tmdb.md)                     |
 | 点播 / 直播播放、换源、分片缓存、弹幕、去广告    | [播放](docs/playback.md)                 |
 | 页面、组件、样式、后台界面                       | [前端界面](docs/frontend.md)             |
 | 部署、环境变量、缓存与回源预算、定时任务         | [部署](docs/deployment.md)               |
