@@ -96,19 +96,75 @@ it('切到另一条线路的同一集，继承进度并更新当前线路的分�
   expect(params.currentEpisodeIndexRef.current).toBe(1);
 });
 
-it('线路缺少当前集时保留原线路和进度，不跳到别的集', () => {
+it.each([
+  ['目标线路缺少当前集', 0],
+  ['目标线路集数少于当前索引', 2],
+])('手动切线在%s时仍切换到首集，从头播放', (_label, episodeIndex) => {
+  const params = options();
+  params.currentEpisodeIndexRef.current = episodeIndex;
+  params.detailRef.current = {
+    ...detail,
+    playback_lines: detail.playback_lines!.map((line) =>
+      line.key === 'b:1' && episodeIndex === 2
+        ? {
+            ...line,
+            episodes: line.episodes.slice(0, 1),
+            episodes_titles: line.episodes_titles.slice(0, 1),
+          }
+        : line,
+    ),
+  };
+  params.resumeTimeRef.current = 200;
+  params.resumeModeRef.current = 'forced';
+  const { result } = renderHook(() => useEpisodeSwitch(params));
+  act(() => result.current.handlePlaybackLineChange('b:1'));
+  expect(params.detailRef.current?.playback_line).toBe('b:1');
+  expect(params.detailRef.current?.episodes).toEqual(
+    params.detailRef.current?.playback_lines?.[1].episodes,
+  );
+  expect(params.currentEpisodeIndexRef.current).toBe(0);
+  expect(params.resumeTimeRef.current).toBe(0);
+  expect(params.resumeModeRef.current).toBeNull();
+  expect(params.stableCurrentTimeRef.current).toBe(0);
+  expect(params.clearTargetEpisodeProgressRef.current).toBe(true);
+  expect(params.setIsVideoLoading).toHaveBeenCalledWith(true);
+  expect(params.doSaveCurrentProgress).toHaveBeenCalledTimes(1);
+  expect(saveDetailSnapshot).toHaveBeenCalledWith(
+    'cms',
+    '42',
+    params.detailRef.current,
+  );
+  expect(showToast).not.toHaveBeenCalled();
+});
+
+it('自动切线遇到缺集时保留原线路和进度', () => {
   const params = options();
   params.currentEpisodeIndexRef.current = 0;
   const { result } = renderHook(() => useEpisodeSwitch(params));
-  act(() => result.current.handlePlaybackLineChange('b:1'));
+  act(() => result.current.handlePlaybackLineChange('b:1', { auto: true }));
   expect(params.detailRef.current).toBe(detail);
   expect(params.currentEpisodeIndexRef.current).toBe(0);
   expect(params.setDetail).not.toHaveBeenCalled();
   expect(params.doSaveCurrentProgress).not.toHaveBeenCalled();
-  expect(showToast).toHaveBeenCalledWith(
-    '该线路缺少当前剧集，已保留当前播放',
-    'notice',
-  );
+  expect(params.resumeTimeRef.current).toBeNull();
+  expect(params.stableCurrentTimeRef.current).toBe(120);
+});
+
+it.each(['missing', 'empty'])('手动选择%s线路时保留当前播放', (key) => {
+  const params = options();
+  const currentDetail = {
+    ...detail,
+    playback_lines: [
+      ...detail.playback_lines!,
+      { key: 'empty', label: '空线路', episodes: [], episodes_titles: [] },
+    ],
+  };
+  params.detailRef.current = currentDetail;
+  const { result } = renderHook(() => useEpisodeSwitch(params));
+  act(() => result.current.handlePlaybackLineChange(key));
+  expect(params.detailRef.current).toBe(currentDetail);
+  expect(params.setDetail).not.toHaveBeenCalled();
+  expect(params.doSaveCurrentProgress).not.toHaveBeenCalled();
 });
 
 it('同集索引不变时仍切换地址，快速切回时保留尚未恢复的进度', () => {

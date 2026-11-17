@@ -14,7 +14,10 @@ import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { shouldInheritCrossGroupProgress } from '@/features/play/lib/episodeGroups';
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
-import { resolvePlaybackLineSwitch } from '@/features/play/lib/playbackLines';
+import {
+  resolvePlaybackLineSwitch,
+  selectPlaybackLine,
+} from '@/features/play/lib/playbackLines';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import { showToast } from '@/lib/toast';
 import { SearchResult } from '@/lib/types';
@@ -188,7 +191,14 @@ export function useEpisodeSwitch({
         key,
       );
       if (!target) {
-        showToast('该线路缺少当前剧集，已保留当前播放', 'notice');
+        if (options?.auto) {
+          showToast('该线路缺少当前剧集，已保留当前播放', 'notice');
+          return;
+        }
+        const nextDetail = selectPlaybackLine(detail, key);
+        if (nextDetail !== detail) {
+          switchEpisode(0, nextDetail, { fromStart: true });
+        }
         return;
       }
       if (options?.auto) {
