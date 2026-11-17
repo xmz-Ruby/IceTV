@@ -129,6 +129,20 @@ describe('createVodBufferBudgetController', () => {
     expect(hls.config.maxMaxBufferLength).toBe(300);
   });
 
+  it('调整偏好可以增减目标，但不能绕过实测字节预算或浏览器上限', () => {
+    const { hls, controller } = setup();
+    controller.handleFragmentLoaded(mainFrag(10 * MBPS));
+    controller.setBaseLimits({ maxBufferLength: 30, maxMaxBufferLength: 30 });
+    expect(hls.config.maxMaxBufferLength).toBe(30);
+    controller.setBaseLimits({ maxBufferLength: 300, maxMaxBufferLength: 300 });
+    expect(hls.config.maxMaxBufferLength).toBe(80);
+    hls.config.maxMaxBufferLength = 40;
+    controller.setBaseLimits({ maxBufferLength: 300, maxMaxBufferLength: 300 });
+    expect(hls.config.maxMaxBufferLength).toBe(40);
+    controller.setBaseLimits({ maxBufferLength: 120, maxMaxBufferLength: 600 });
+    expect(hls.config.maxMaxBufferLength).toBe(40);
+  });
+
   it('当前位置未缓冲或非主缓冲的 bufferFullError 交给 hls.js 处理', () => {
     const { hls, video, controller } = setup();
     controller.handleFragmentLoaded(mainFrag(10 * MBPS));

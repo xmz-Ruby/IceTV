@@ -36,6 +36,7 @@ import {
   createVodFragmentCacheRecoveryLoader,
   shouldRecoverVodFragmentHttpCache,
 } from '@/features/play/lib/vodFragmentCacheRecovery';
+import { createVodFragmentPreloadController } from '@/features/play/lib/vodFragmentPreload';
 import {
   type HlsLevelFailure,
   createVodHlsQualityController,
@@ -54,6 +55,11 @@ import {
   resolveVodSourceFragmentTimeoutMs,
 } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { logHlsError } from '@/lib/hls-error-log';
+import {
+  normalizePlayerBufferPreferences,
+  PLAYER_BUFFER_PREFERENCES_EVENT,
+  readPlayerBufferPreferences,
+} from '@/lib/player-buffer-preferences';
 import {
   assignManagedVideoCleanup,
   destroyManagedHls,
@@ -101,6 +107,7 @@ type CreateVodM3u8LoaderOptions = {
   setIsVideoLoading: Dispatch<SetStateAction<boolean>>;
   setRealtimeLoadSpeed: Dispatch<SetStateAction<string>>;
   onSourceProxyFallbackStarted?: () => void;
+  onBufferUpdated?: () => void;
   // 返回 true 表示外层已接手（如自动换源），不再展示当前源失败
   onPlaybackRecoveryExhausted?: (reason: string) => boolean;
   onCurrentSourceVideoInfo?: (
@@ -215,6 +222,7 @@ export function createVodM3u8Loader({
   setIsVideoLoading,
   setRealtimeLoadSpeed,
   onSourceProxyFallbackStarted,
+  onBufferUpdated,
   onPlaybackRecoveryExhausted,
   onCurrentSourceVideoInfo,
 }: CreateVodM3u8LoaderOptions) {
@@ -247,10 +255,23 @@ export function createVodM3u8Loader({
     });
     const sourceBufferOverrides = getVodHlsBufferOverrides(sourceKey);
     const sourceLoadingOverrides = getVodHlsLoadingOverrides(sourceKey);
-    const hlsConfig = {
+    const baseHlsConfig = {
       ...sharedHlsConfig,
       ...sourceBufferOverrides,
     };
+    let bufferPreferences = readPlayerBufferPreferences();
+    video.autoplay = bufferPreferences.startupBufferSeconds === 0;
+    const resolveBufferConfig = () => ({
+      ...baseHlsConfig,
+      ...(bufferPreferences.forwardBufferSeconds > 0
+        ? {
+            maxBufferLength: bufferPreferences.forwardBufferSeconds,
+            maxMaxBufferLength: bufferPreferences.forwardBufferSeconds,
+          }
+        : {}),
+      __icetvStartupBufferSeconds: bufferPreferences.startupBufferSeconds,
+    });
+    const hlsConfig = resolveBufferConfig();
     const useClientAdFilter = blockAdEnabledRef.current;
     const fragmentHttpCacheRecovery =
       shouldRecoverVodFragmentHttpCache(sourceKey);
@@ -274,6 +295,8 @@ export function createVodM3u8Loader({
       hls.config.maxBufferLength = hlsConfig.maxBufferLength;
       hls.config.maxMaxBufferLength = hlsConfig.maxMaxBufferLength;
       hls.config.maxBufferSize = hlsConfig.maxBufferSize;
+      hls.config.__icetvStartupBufferSeconds =
+        hlsConfig.__icetvStartupBufferSeconds;
       hls.config.loader = sourceLoader;
       hls.config.manifestLoadingTimeOut =
         sourceLoadingOverrides.manifestLoadingTimeOut ?? 10000;
@@ -372,12 +395,24 @@ export function createVodM3u8Loader({
       : playbackRoute.useServerProxy;
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
-    const segmentPrebufferController = createVodSegmentPrebufferController({
-      getCurrentTime: () => video.currentTime || 0,
-      getForwardBufferSeconds: () => getForwardBufferSeconds(video),
-      isServerProxy: () => currentUseServerProxy,
-      sourceKey,
-    });
+    const createSegmentPrebuffer = () =>
+      createVodSegmentPrebufferController({
+        getCurrentTime: () => video.currentTime || 0,
+        getForwardBufferSeconds: () => getForwardBufferSeconds(video),
+        isServerProxy: () => currentUseServerProxy,
+        sourceKey: bufferPreferences.fragmentConcurrency > 1 ? '' : sourceKey,
+      });
+    let segmentPrebufferController = createSegmentPrebuffer();
+    const createFragmentPreload = () =>
+      createVodFragmentPreloadController({
+        hls,
+        video,
+        concurrency: bufferPreferences.fragmentConcurrency,
+      });
+    let fragmentPreloadController = createFragmentPreload();
+    let loadingFragment: Parameters<
+      typeof fragmentPreloadController.handleFragmentLoading
+    >[0];
     const failureWindowMs = resolveAutoRouteFailureWindowMs(fragmentTimeoutMs);
     const browserFailureTracker = new ConsecutiveRouteFailureTracker(
       BROWSER_ROUTE_FAILURE_THRESHOLD,
@@ -501,6 +536,8 @@ export function createVodM3u8Loader({
       targetUrl = buildTargetUrl(url, nextServer);
       managedVideo.__icetvUsingServerProxy = nextServer;
       segmentPrebufferController.dispose();
+      fragmentPreloadController.reset();
+      loadingFragment = undefined;
       recoveryController.cancelPendingRetry();
       firstFragSpeed = '';
       firstFragPing = 0;
@@ -659,6 +696,32 @@ export function createVodM3u8Loader({
     const onTimeUpdate = () => {
       recoveryController.handlePlaybackProgress(video.currentTime);
     };
+    const onSeeking = () => {
+      fragmentPreloadController.handleSeeking();
+      loadingFragment = undefined;
+    };
+    const onBufferPreferencesChange = (event: Event) => {
+      if (videoRuntimeCleaned) return;
+      const previousConcurrency = bufferPreferences.fragmentConcurrency;
+      bufferPreferences = normalizePlayerBufferPreferences(
+        (event as CustomEvent).detail,
+      );
+      const config = resolveBufferConfig();
+      if (!loadingSessionRef.current.playbackStartNotified) {
+        video.autoplay = bufferPreferences.startupBufferSeconds === 0;
+      }
+      hls.config.__icetvStartupBufferSeconds =
+        config.__icetvStartupBufferSeconds;
+      bufferBudgetController.setBaseLimits(config);
+      if (previousConcurrency !== bufferPreferences.fragmentConcurrency) {
+        fragmentPreloadController.dispose();
+        fragmentPreloadController = createFragmentPreload();
+        segmentPrebufferController.dispose();
+        segmentPrebufferController = createSegmentPrebuffer();
+        fragmentPreloadController.handleFragmentLoading(loadingFragment);
+      }
+      onBufferUpdated?.();
+    };
     const tryReportVideoInfo = () => {
       if (videoInfoReported || !firstFragSpeed) return;
       const w = video.videoWidth;
@@ -682,6 +745,12 @@ export function createVodM3u8Loader({
       clearVodStartupProgress(video);
       qualityController.dispose();
       segmentPrebufferController.dispose();
+      fragmentPreloadController.dispose();
+      window.removeEventListener(
+        PLAYER_BUFFER_PREFERENCES_EVENT,
+        onBufferPreferencesChange,
+      );
+      video.removeEventListener('seeking', onSeeking);
       recoveryController.dispose();
       clearStallConfirmation();
       if (speedFallbackTimer) {
@@ -699,6 +768,11 @@ export function createVodM3u8Loader({
     video.addEventListener('stalled', onStalled);
     video.addEventListener('playing', onPlaying);
     video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('seeking', onSeeking);
+    window.addEventListener(
+      PLAYER_BUFFER_PREFERENCES_EVENT,
+      onBufferPreferencesChange,
+    );
 
     const onHlsError = function (_event: unknown, data: any) {
       if (
@@ -860,10 +934,14 @@ export function createVodM3u8Loader({
         : null;
       bufferBudgetController.handleFragmentLoading(data?.frag);
       qualityController.handleFragmentLoading(levelIndex);
+      loadingFragment = data?.part ? undefined : data?.frag;
+      if (data?.part) fragmentPreloadController.reset();
+      fragmentPreloadController.handleFragmentLoading(loadingFragment);
     };
 
     const onHlsFragBuffered = function () {
       qualityController.handleBufferUpdated();
+      onBufferUpdated?.();
     };
 
     const onHlsLevelLoaded = function (_: unknown, data: any) {

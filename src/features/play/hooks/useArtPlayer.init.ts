@@ -28,6 +28,7 @@ import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePrelo
 import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
+  hasVodStartupBuffer,
   markPlayerLoadingSessionStarted,
   registerStartupStateDescriber,
   resetPlayerLoadingSessionState,
@@ -58,6 +59,7 @@ import {
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { readPlayerBufferPreferences } from '@/lib/player-buffer-preferences';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -299,6 +301,10 @@ export async function initializeArtPlayer(
         lastPlaybackRateRef.current,
       );
       const reusedPlayer = artPlayerRef.current;
+      // switchUrl 会记住切换前的 playing 并在 canplay 自动播放；起播缓冲启用时先暂停。
+      if (readPlayerBufferPreferences().startupBufferSeconds > 0) {
+        reusedPlayer.pause();
+      }
       registerStartupDiagnostics(reusedPlayer, () => ({
         initPath: 'reused',
         carriedResumeTarget,
@@ -344,6 +350,7 @@ export async function initializeArtPlayer(
       },
     );
 
+    let notifyBufferUpdated = () => {};
     const m3u8Loader = createVodM3u8Loader({
       Hls,
       adBlockingHlsLoader,
@@ -362,6 +369,7 @@ export async function initializeArtPlayer(
       setIsVideoLoading,
       setRealtimeLoadSpeed,
       onSourceProxyFallbackStarted,
+      onBufferUpdated: () => notifyBufferUpdated(),
       playbackIntentRef,
       onPlaybackRecoveryExhausted,
       onCurrentSourceVideoInfo,
@@ -390,6 +398,9 @@ export async function initializeArtPlayer(
         aspectRatio: true,
         screenshot: true,
         fastForward: false,
+        autoplay:
+          mediaKind !== 'hls' ||
+          readPlayerBufferPreferences().startupBufferSeconds === 0,
       }),
       type: mediaKind === 'native' && isVodMp4Url(videoUrl) ? 'mp4' : '',
       customType: {
@@ -406,6 +417,7 @@ export async function initializeArtPlayer(
         setBlockAdEnabled,
         setAutoPlayNextEnabled,
         handleSkipConfigChange,
+        hlsPlayback: mediaKind === 'hls',
       }),
       controls: createArtPlayerControls({
         handleNextEpisode,
@@ -685,8 +697,23 @@ export async function initializeArtPlayer(
       // 换源开始或逐集解析停旧集时运行时已释放，视频上仍是被放弃的旧地址，它的就绪和起播不能当作本次加载完成
       getVodRuntimeSourceUrl(player.video as HTMLVideoElement) === null;
 
+    const isStartupBufferReady = () => {
+      if (loadingSessionRef.current.playbackStartNotified) return true;
+      const video = player.video as HTMLVideoElement;
+      const hls = getManagedVideo(video).hls;
+      return (
+        !hls ||
+        hasVodStartupBuffer(
+          video,
+          hls.config.__icetvStartupBufferSeconds ?? 0,
+          loadingSessionRef.current.pendingInitialResumeTarget,
+          hls.config.maxMaxBufferLength,
+        )
+      );
+    };
+
     const finishInitialLoading = (playing = false) => {
-      if (isStalePlayerSession()) {
+      if (isStalePlayerSession() || !isStartupBufferReady()) {
         return;
       }
 
@@ -707,6 +734,7 @@ export async function initializeArtPlayer(
     };
 
     let initialPlaybackRequestInFlight = false;
+    let initialPlaybackRequestUrl: string | null = null;
     // hls 仍在加载时再 startLoad 会中止在途分片并从头重下，只在加载被停掉时补拉
     const resumeHlsLoadingIfStopped = (video: HTMLVideoElement) => {
       const hls = getManagedVideo(video).hls;
@@ -715,9 +743,13 @@ export async function initializeArtPlayer(
     const requestInitialPlayback = (
       video: HTMLVideoElement | null | undefined,
     ) => {
-      if (!video || initialPlaybackRequestInFlight) {
-        return;
+      if (!video) return;
+      const runtimeUrl = getVodRuntimeSourceUrl(video);
+      if (runtimeUrl !== initialPlaybackRequestUrl) {
+        initialPlaybackRequestUrl = runtimeUrl;
+        initialPlaybackRequestInFlight = false;
       }
+      if (initialPlaybackRequestInFlight) return;
 
       initialPlaybackRequestInFlight = true;
       resumeHlsLoadingIfStopped(video);
@@ -752,6 +784,7 @@ export async function initializeArtPlayer(
     }));
 
     const completePendingResumeIfReady = () => {
+      if (!isStartupBufferReady()) return false;
       if (
         !hasReachedResumeTarget(
           player.currentTime || 0,
@@ -871,6 +904,7 @@ export async function initializeArtPlayer(
       }
 
       ensureInitialPlaybackPosition();
+      if (!isStartupBufferReady()) return;
 
       const activeVideo = player.video as HTMLVideoElement | null;
       const isPlayingReady = shouldDismissLoadingFromCanPlay(activeVideo);
@@ -893,6 +927,8 @@ export async function initializeArtPlayer(
         requestInitialPlayback(activeVideo);
       }
     };
+
+    notifyBufferUpdated = finishInitialLoadingIfMediaReady;
 
     const unbindDanmakuSliderDrag = bindDanmakuSliderDrag(player);
     player.on('destroy', unbindDanmakuSliderDrag);
@@ -920,8 +956,18 @@ export async function initializeArtPlayer(
       setIsPlaying(true);
     });
 
+    player.on('video:play', () => {
+      if (!isStalePlayerSession() && !isStartupBufferReady()) {
+        player.video.pause();
+      }
+    });
+
     player.on('video:playing', () => {
       ensureInitialPlaybackPosition();
+      if (!isStalePlayerSession() && !isStartupBufferReady()) {
+        player.video.pause();
+        return;
+      }
       finishInitialLoading(true);
       if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('playing');
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {

@@ -5,6 +5,7 @@ import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { initializeArtPlayer } from '@/features/play/hooks/useArtPlayer.init';
 import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
+import { writePlayerBufferPreferences } from '@/lib/player-buffer-preferences';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
 import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
 import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
@@ -65,10 +66,16 @@ class MockHls {
   off(event: string, listener: Listener) {
     this.listeners.get(event)?.delete(listener);
   }
+
+  emit(event: string, data: unknown = {}) {
+    for (const listener of this.listeners.get(event) ?? [])
+      listener(event, data);
+  }
 }
 
 type MockArtplayerOption = {
   url: string;
+  autoplay?: boolean;
   customType: { m3u8: (video: HTMLVideoElement, url: string) => void };
 };
 
@@ -287,6 +294,11 @@ describe('initializeArtPlayer 拉流控制', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     MockArtplayer.instances = [];
+    writePlayerBufferPreferences({
+      startupBufferSeconds: 0,
+      forwardBufferSeconds: 0,
+      fragmentConcurrency: 1,
+    });
     jest.mocked(resolveSourcePlaybackRoute).mockReset().mockResolvedValue({
       useServerProxy: false,
       directManifest: false,
@@ -648,6 +660,24 @@ describe('initializeArtPlayer 拉流控制', () => {
       );
     });
 
+    it('复用换集时起播缓冲阻止 switchUrl 提前自动播放', async () => {
+      writePlayerBufferPreferences({
+        startupBufferSeconds: 5,
+        forwardBufferSeconds: 60,
+        fragmentConcurrency: 1,
+      });
+      const { params, player, rerender } = await mountHook();
+      player.playing = true;
+      params.currentEpisodeIndexRef.current = 1;
+      rerender({ ...params, videoUrl: EPISODE_2, currentEpisodeIndex: 1 });
+      await act(flushMicrotasks);
+      expect(player.pause).toHaveBeenCalledTimes(1);
+      expect(player.switchUrl).toHaveBeenCalledWith(EPISODE_2);
+      expect(
+        getManagedVideo(player.video).hls?.config.__icetvStartupBufferSeconds,
+      ).toBe(5);
+    });
+
     it.each(['source', 'id', 'retry', 'ad'] as const)(
       'reinitializes when %s changes',
       async (field) => {
@@ -712,6 +742,48 @@ describe('initializeArtPlayer 拉流控制', () => {
   });
 
   describe('起播', () => {
+    it('等待目标缓冲后才起播，分片追加完成能触发检查且不重复 startLoad', async () => {
+      writePlayerBufferPreferences({
+        startupBufferSeconds: 5,
+        forwardBufferSeconds: 60,
+        fragmentConcurrency: 1,
+      });
+      const params = createParams();
+      params.onPlaybackStarted = jest.fn();
+      params.clearTargetEpisodeProgressRef.current = true;
+      const { player, video, hls } = await setupPlayer(params);
+      const writePosition = jest.fn();
+      Object.defineProperty(player, 'currentTime', {
+        configurable: true,
+        get: () => 0,
+        set: writePosition,
+      });
+      makeFirstFrameReady(video);
+      let end = 2;
+      Object.defineProperty(video, 'buffered', {
+        configurable: true,
+        get: () => ({ length: 1, start: () => 0, end: () => end }),
+      });
+      video.play = jest.fn().mockResolvedValue(undefined);
+      player.emit('video:canplay');
+      player.emit('video:seeked');
+      player.emit('video:canplay');
+      player.emit('video:playing');
+      await flushMicrotasks();
+      expect(writePosition).toHaveBeenCalledTimes(1);
+      expect(player.option.autoplay).toBe(false);
+      expect(video.play).not.toHaveBeenCalled();
+      expect(params.onPlaybackStarted).not.toHaveBeenCalled();
+      expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+      end = 6;
+      hls.emit(MockHls.Events.FRAG_BUFFERED);
+      await flushMicrotasks();
+      expect(video.play).toHaveBeenCalledTimes(1);
+      expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+      expect(hls.startLoad).not.toHaveBeenCalled();
+    });
+
     it('hls 仍在加载时直接播放，不重新拉流', async () => {
       const { player, video, hls } = await setupPlayer();
       makeFirstFrameReady(video);

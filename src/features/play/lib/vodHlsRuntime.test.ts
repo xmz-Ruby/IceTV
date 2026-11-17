@@ -9,6 +9,10 @@ import {
 } from '@/features/play/lib/vodHlsRuntime';
 import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
+import {
+  PLAYER_BUFFER_PREFERENCES_EVENT,
+  writePlayerBufferPreferences,
+} from '@/lib/player-buffer-preferences';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
 import {
   HLS_FATAL_MEDIA_RECOVERY_LIMIT,
@@ -220,6 +224,57 @@ function setupRuntime() {
     onPlaybackRecoveryExhausted,
   };
 }
+
+describe('vodHlsRuntime 缓冲设置', () => {
+  beforeEach(() => {
+    mockIsServerProxy.mockReset().mockReturnValue(false);
+    mockShouldAutoFallbackToServer.mockReset().mockReturnValue(false);
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    writePlayerBufferPreferences({
+      startupBufferSeconds: 0,
+      forwardBufferSeconds: 0,
+      fragmentConcurrency: 1,
+    });
+    jest.restoreAllMocks();
+  });
+
+  it('显式前向时长覆盖源配置，菜单调整即时应用且复用换集保留偏好', () => {
+    const preferences = {
+      startupBufferSeconds: 5,
+      forwardBufferSeconds: 30,
+      fragmentConcurrency: 1,
+    };
+    writePlayerBufferPreferences(preferences);
+    const { load, options } = setupRuntime();
+    options.detailRef.current = { ...DETAIL, source: 'jpys' };
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    expect(hls.config.maxBufferLength).toBe(30);
+    expect(hls.config.maxMaxBufferLength).toBe(30);
+    expect(video.autoplay).toBe(false);
+    expect(hls.config.__icetvStartupBufferSeconds).toBe(5);
+    window.dispatchEvent(
+      new CustomEvent(PLAYER_BUFFER_PREFERENCES_EVENT, {
+        detail: { ...preferences, forwardBufferSeconds: 120 },
+      }),
+    );
+    expect(hls.config.maxMaxBufferLength).toBe(120);
+    load(video, EPISODE_2);
+    expect(getFakeHls(video)).toBe(hls);
+    expect(hls.config.maxMaxBufferLength).toBe(30);
+    runManagedVideoCleanup(video);
+    window.dispatchEvent(
+      new CustomEvent(PLAYER_BUFFER_PREFERENCES_EVENT, {
+        detail: { ...preferences, forwardBufferSeconds: 300 },
+      }),
+    );
+    expect(hls.config.maxMaxBufferLength).toBe(30);
+  });
+});
 
 describe('vodHlsRuntime 运行时释放', () => {
   beforeEach(() => {

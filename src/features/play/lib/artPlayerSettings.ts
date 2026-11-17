@@ -7,6 +7,13 @@ import {
   writeBlockAdEnabled,
 } from '@/lib/local-preferences';
 import {
+  type PlayerBufferPreferences,
+  PLAYER_BUFFER_OPTIONS,
+  PLAYER_BUFFER_PREFERENCES_EVENT,
+  readPlayerBufferPreferences,
+  writePlayerBufferPreferences,
+} from '@/lib/player-buffer-preferences';
+import {
   destroyManagedHls,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
@@ -27,6 +34,7 @@ type ArtPlayerSettingsOptions = {
   setBlockAdEnabled: Dispatch<SetStateAction<boolean>>;
   setAutoPlayNextEnabled: Dispatch<SetStateAction<boolean>>;
   handleSkipConfigChange: (newConfig: SkipConfig) => Promise<void>;
+  hlsPlayback?: boolean;
 };
 
 type ArtPlayerControlsOptions = {
@@ -46,6 +54,50 @@ const SKIP_INTRO_ICON =
 const SKIP_OUTRO_ICON =
   '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="12" r="2" fill="#ffffff"/><path d="M7 12L15 12" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M19 6L19 18" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>';
 
+function createBufferSettings() {
+  let preferences = readPlayerBufferPreferences();
+  const fields: Array<{ key: keyof PlayerBufferPreferences; label: string }> = [
+    { key: 'startupBufferSeconds', label: '起播缓冲' },
+    { key: 'forwardBufferSeconds', label: '前向缓冲' },
+    { key: 'fragmentConcurrency', label: '分片并发' },
+  ];
+  const labelFor = (key: keyof PlayerBufferPreferences, value: number) =>
+    key === 'fragmentConcurrency'
+      ? value === 1
+        ? '默认（顺序加载）'
+        : `${value} 个`
+      : value === 0
+        ? key === 'startupBufferSeconds'
+          ? '自动（尽快播放）'
+          : '自动'
+        : `${value} 秒`;
+
+  return fields.map(({ key, label }) => ({
+    name: key,
+    html: label,
+    tooltip: labelFor(key, preferences[key]),
+    selector: PLAYER_BUFFER_OPTIONS[key].map((value) => ({
+      html: labelFor(key, value),
+      value,
+      default: preferences[key] === value,
+    })),
+    onSelect(item: { value: number }) {
+      preferences = { ...preferences, [key]: item.value };
+      if (!writePlayerBufferPreferences(preferences)) {
+        showToast('设置未能保存，重新加载后会恢复', 'error', {
+          key: 'local-preference-save',
+        });
+      }
+      window.dispatchEvent(
+        new CustomEvent(PLAYER_BUFFER_PREFERENCES_EVENT, {
+          detail: preferences,
+        }),
+      );
+      return labelFor(key, item.value);
+    },
+  }));
+}
+
 export function createArtPlayerSettings({
   artPlayerRef,
   blockAdEnabled,
@@ -57,6 +109,7 @@ export function createArtPlayerSettings({
   setBlockAdEnabled,
   setAutoPlayNextEnabled,
   handleSkipConfigChange,
+  hlsPlayback = false,
 }: ArtPlayerSettingsOptions) {
   return [
     {
@@ -109,6 +162,7 @@ export function createArtPlayerSettings({
         return newVal;
       },
     },
+    ...(hlsPlayback ? createBufferSettings() : []),
     {
       name: '跳过片头片尾',
       html: '跳过片头片尾',

@@ -1,3 +1,5 @@
+import { getForwardBufferSeconds } from '@/features/play/lib/vodBufferPriority';
+
 export interface VodStartupProgress {
   sourceKey: string;
   startedAt: number;
@@ -114,6 +116,29 @@ export function describeVodStartupState(
     session: describe('session'),
     route: describe('route'),
   };
+}
+
+export function hasVodStartupBuffer(
+  video: Pick<HTMLVideoElement, 'buffered' | 'currentTime' | 'duration'>,
+  seconds: number,
+  resumeTarget: number | null,
+  maxForwardSeconds: number,
+): boolean {
+  if (!(seconds > 0)) return true;
+  const position = resumeTarget ?? video.currentTime;
+  const remaining =
+    Number.isFinite(video.duration) && video.duration > 0
+      ? Math.max(0, video.duration - position)
+      : Infinity;
+  const required = Math.min(seconds, maxForwardSeconds, remaining);
+  return (
+    getForwardBufferSeconds({
+      buffered: video.buffered,
+      currentTime: position,
+    }) +
+      0.1 >=
+    required
+  );
 }
 
 export interface PlayerLoadingSessionState {

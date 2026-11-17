@@ -1,5 +1,6 @@
 import {
   hasReachedResumeTarget,
+  hasVodStartupBuffer,
   markPlayerLoadingSessionStarted,
   resetPlayerLoadingSessionState,
   shouldDismissLoadingFromCanPlay,
@@ -54,6 +55,36 @@ describe('playerLoading', () => {
   it('恢复进度达到目标附近后即可关闭遮罩', () => {
     expect(hasReachedResumeTarget(299.4, 300)).toBe(true);
     expect(hasReachedResumeTarget(120, 300)).toBe(false);
+  });
+
+  it('按续播位置的连续缓冲判断起播，不把其他区间加起来', () => {
+    const video = {
+      currentTime: 0,
+      duration: 600,
+      buffered: {
+        length: 2,
+        start: (index: number) => [0, 100][index],
+        end: (index: number) => [30, 103][index],
+      },
+    };
+    expect(hasVodStartupBuffer(video, 5, 100, 60)).toBe(false);
+    expect(hasVodStartupBuffer(video, 3, 100, 60)).toBe(true);
+    expect(hasVodStartupBuffer(video, 0, 100, 60)).toBe(true);
+  });
+
+  it('片尾剩余时长与实际缓冲上限小于起播目标时仍可放行', () => {
+    const video = {
+      currentTime: 98,
+      duration: 100,
+      buffered: { length: 1, start: () => 98, end: () => 100 },
+    };
+    expect(hasVodStartupBuffer(video, 10, null, 60)).toBe(true);
+    expect(hasVodStartupBuffer({ ...video, duration: 600 }, 10, null, 2)).toBe(
+      true,
+    );
+    expect(hasVodStartupBuffer({ ...video, duration: NaN }, 10, null, 60)).toBe(
+      false,
+    );
   });
 
   it('新一轮切集加载会重置关闭遮罩的会话状态', () => {

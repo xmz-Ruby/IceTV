@@ -160,7 +160,7 @@ export function createFragmentMemoryCache(
 
 export const fragmentMemoryCache = createFragmentMemoryCache();
 
-type LoadStats = {
+export type LoadStats = {
   aborted: boolean;
   loaded: number;
   retry: number;
@@ -171,6 +171,19 @@ type LoadStats = {
   parsing: { start: number; end: number };
   buffering: { start: number; first: number; end: number };
 };
+
+// 预取请求可被正式播放接管；stats 始终指向当前消费者的统计对象。
+export type PendingFragment = {
+  promise: Promise<FragmentMemoryEntry | null>;
+  stats: LoadStats;
+  claimed: boolean;
+  abort: () => void;
+};
+
+export const pendingFragmentPreloads = new WeakMap<
+  object,
+  Map<string, PendingFragment>
+>();
 
 type FragmentLoaderContext = {
   url: string;
@@ -241,7 +254,7 @@ export type FragmentMemoryLoaderOptions = {
   fetcher?: FragmentFetcher;
 };
 
-function createLoadStats(): LoadStats {
+export function createLoadStats(): LoadStats {
   return {
     aborted: false,
     loaded: 0,
@@ -430,6 +443,8 @@ export function withFragmentMemoryCache(
     private pendingEntry: FragmentMemoryEntry | null = null;
     private timer: ReturnType<typeof setTimeout> | null = null;
     private controller: AbortController | null = null;
+    private preload: PendingFragment | null = null;
+    private readonly preloads: Map<string, PendingFragment> | undefined;
 
     constructor(config: unknown) {
       const Base =
@@ -440,6 +455,10 @@ export function withFragmentMemoryCache(
       }
       this.inner = new Base(config) as InnerLoader;
       this.stats = this.inner.stats ?? createLoadStats();
+      this.preloads =
+        config && typeof config === 'object'
+          ? pendingFragmentPreloads.get(config)
+          : undefined;
     }
 
     get context(): unknown {
@@ -450,7 +469,8 @@ export function withFragmentMemoryCache(
       const loaderContext = context as FragmentLoaderContext;
       const url = resolveCacheableFragmentUrl(loaderContext);
       const entry = url ? cache.take(url) : null;
-      if (!url || !entry) {
+      const preload = url ? this.preloads?.get(url) : null;
+      if (!url || (!entry && (!preload || preload.claimed))) {
         this.delegate(context, config, callbacks);
         return;
       }
@@ -462,6 +482,23 @@ export function withFragmentMemoryCache(
       this.pendingEntry = entry;
       this.stats.loading.start = performance.now();
 
+      if (!entry && preload) {
+        preload.claimed = true;
+        Object.assign(this.stats, preload.stats);
+        preload.stats = this.stats;
+        this.preload = preload;
+        void preload.promise.then((result) => {
+          if (this.settled || !this.callbacks) return;
+          this.preload = null;
+          if (result) {
+            this.deliverCompleteEntry(result);
+          } else {
+            this.fallbackToBaseLoader();
+          }
+        });
+        return;
+      }
+      if (!entry) return;
       if (entry.complete) {
         this.timer = setTimeout(() => this.deliverCompleteEntry(entry), 0);
         return;
@@ -506,6 +543,8 @@ export function withFragmentMemoryCache(
       const controller = this.controller;
       this.controller = null;
       controller?.abort();
+      this.preload?.abort();
+      this.preload = null;
     }
 
     private restorePendingEntry(): void {

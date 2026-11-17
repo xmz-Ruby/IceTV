@@ -33,6 +33,7 @@ type VodBufferBudgetErrorData =
   | undefined;
 
 export type VodBufferBudgetController = {
+  setBaseLimits: (limits: VodForwardBufferLimits) => void;
   handleFragmentLoading: (frag: VodBufferBudgetFragment) => void;
   handleFragmentLoaded: (frag: VodBufferBudgetFragment) => void;
   // 返回 true 表示已按本次 bufferFullError 收紧前向上限
@@ -44,7 +45,7 @@ function getMainFragmentLevel(frag: VodBufferBudgetFragment): number | null {
   return Number.isInteger(frag.level) ? Number(frag.level) : null;
 }
 
-// 创建时 hls.config 须已是本次加载的缓冲配置；之后写入的上限不高于该配置，也不高于 hls.js 自行降低过的值
+// 创建时 hls.config 须已是本次加载的缓冲配置；显式偏好可调整基线，但不能抬回 hls.js 因配额自行降低的上限。
 export function createVodBufferBudgetController({
   hls,
   video,
@@ -59,6 +60,7 @@ export function createVodBufferBudgetController({
     maxMaxBufferLength: hls.config.maxMaxBufferLength,
   };
   let lastAppliedMaxMax = base.maxMaxBufferLength;
+  let browserMaxBufferLength = Infinity;
   const measured = new Map<number, { bytes: number; duration: number }>();
   let loadingLevel: number | null = null;
   let learnedBudgetBytes: number | null = null;
@@ -77,13 +79,19 @@ export function createVodBufferBudgetController({
   const apply = () => {
     // hls.js 在 bufferFullError 等场景会自行调低 maxMaxBufferLength，沿用其结果，不再抬回去
     if (hls.config.maxMaxBufferLength < lastAppliedMaxMax) {
-      base.maxMaxBufferLength = Math.min(
-        base.maxMaxBufferLength,
+      browserMaxBufferLength = Math.min(
+        browserMaxBufferLength,
         hls.config.maxMaxBufferLength,
       );
     }
     const limits = resolveVodForwardBufferLimits(
-      base,
+      {
+        ...base,
+        maxMaxBufferLength: Math.min(
+          base.maxMaxBufferLength,
+          browserMaxBufferLength,
+        ),
+      },
       resolveBitrate(),
       learnedBudgetBytes,
     );
@@ -93,6 +101,10 @@ export function createVodBufferBudgetController({
   };
 
   return {
+    setBaseLimits(limits) {
+      Object.assign(base, limits);
+      apply();
+    },
     handleFragmentLoading(frag) {
       const level = getMainFragmentLevel(frag);
       if (level === null) return;
